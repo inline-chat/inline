@@ -67,8 +67,10 @@ class UserAvatarView: NSView {
     true
   }
 
+  /// `point` is in the superview's coordinates (AppKit's contract; the new list's row hosts pass it so).
   override func hitTest(_ point: NSPoint) -> NSView? {
-    let hit = acceptsMouseInteraction && bounds.contains(point) ? self : nil
+    let local = superview.map { convert(point, from: $0) } ?? point
+    let hit = acceptsMouseInteraction && bounds.contains(local) ? self : nil
     MessageGestureTrace.trace(
       "MessageAvatarView.hitTest point=\(MessageGestureTrace.point(point)) accepts=\(acceptsMouseInteraction) hit=\(hit != nil)"
     )

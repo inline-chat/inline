@@ -198,6 +198,15 @@ class ChatViewAppKit: NSViewController {
     startDeferredObservationIfNeeded()
   }
 
+  /// Runs `work` after this chat's first messages are on screen (its frame committed), or at once without Nav3.
+  func afterFirstMessages(_ work: @escaping () -> Void) {
+    guard let nav3 = dependencies.nav3 else {
+      DispatchQueue.main.async(execute: work)
+      return
+    }
+    nav3.afterFirstMessages(peer: peerId, work)
+  }
+
   override func viewDidLayout() {
     viewDidLayoutCount += 1
     let shouldSignpost = viewDidLayoutCount <= 20
@@ -385,6 +394,24 @@ class ChatViewAppKit: NSViewController {
       let coldOpeningState = preparedPayload == nil
         ? ChatOpenPreloader.coldOpeningState(peer: peerId, database: dependencies.database)
         : nil
+      PerformanceTrace.setDiagnosticTag(
+        "messages.list", value: AppSettings.shared.timelineMessageListEnabled ? "timeline" : "table"
+      )
+      if AppSettings.shared.timelineMessageListEnabled {
+        messageListVC_ = TimelineMessageListAppKit(
+          dependencies: dependencies,
+          peerId: peerId,
+          chat: chat,
+          showUnreadAfter: unreadBoundaryAtOpen(coldOpeningState: coldOpeningState),
+          initialState: preparedPayload?.messagesInitialState ?? coldOpeningState,
+          initialTargetMessageId: preparedPayload?.targetMessageId,
+          unreadFetchBoundary: preparedPayload?.unreadFetchBoundary,
+          collapsedMaxId: dialog?.collapsedMaxId,
+          initialPinnedMessage: preparedPayload?.pinnedMessage,
+          surfaceStyle: appearance.surfaceStyle,
+          additionalTopContentInset: appearance.additionalTopContentInset
+        )
+      } else {
       messageListVC_ = MessageListAppKit(
         dependencies: dependencies,
         peerId: peerId,
@@ -398,6 +425,7 @@ class ChatViewAppKit: NSViewController {
         surfaceStyle: appearance.surfaceStyle,
         additionalTopContentInset: appearance.additionalTopContentInset
       )
+      }
     }
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
@@ -529,7 +557,9 @@ class ChatViewAppKit: NSViewController {
     }
   }
 
-  private func clearCurrentViews() {
+  /// `removingViews: false` leaves the views where they are for the caller to take out of the window later (a chat
+  /// switch does it after the incoming chat's first frame).
+  private func clearCurrentViews(removingViews: Bool = true) {
     closeInChatSearch()
     centeredChatsCancellable?.cancel()
     centeredChatsCancellable = nil
@@ -538,18 +568,18 @@ class ChatViewAppKit: NSViewController {
     // Remove any non-controller views
     if let messageListVC {
       messageListVC.dispose()
-      messageListVC.view.removeFromSuperview()
+      if removingViews { messageListVC.view.removeFromSuperview() }
       messageListVC.removeFromParent()
     }
 
     // Remove child view controllers properly
     for child in children {
-      child.view.removeFromSuperview()
+      if removingViews { child.view.removeFromSuperview() }
       child.removeFromParent()
     }
 
     compose?.messageList = nil
-    compose?.removeFromSuperview()
+    if removingViews { compose?.removeFromSuperview() }
 
     // Reset all references
     spinnerVC = nil
@@ -562,7 +592,10 @@ class ChatViewAppKit: NSViewController {
     super.viewWillDisappear()
   }
 
-  func dispose() {
+  /// Ends the chat. `removingViews: false` keeps its views in its view (out of their controllers) for the caller to
+  /// take out of the window: taking a chat's view tree out of the window tells every view, about 7 ms in the
+  /// timeline journey's chat switches, which a switch does after the incoming chat's first frame.
+  func dispose(removingViews: Bool = true) {
     guard !isDisposed else { return }
     isDisposed = true
     toolbarState?.isContentUnavailable = false
@@ -572,7 +605,7 @@ class ChatViewAppKit: NSViewController {
     chatItemCancellable = nil
     viewModel.dispose()
     removeObservers()
-    clearCurrentViews()
+    clearCurrentViews(removingViews: removingViews)
   }
 
   deinit {

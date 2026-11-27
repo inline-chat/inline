@@ -1241,6 +1241,10 @@ class GlassComposeAppKit: NSView {
   }
 
   private func setupVoiceObserver() {
+    // The publisher hands its current phase to the sink as it subscribes, while the composer is being built for a
+    // chat that opens: that height applies at once. Animated, it committed a Core Animation transaction (AppKit's
+    // whole display cycle) inside the chat switch and asked the message list to animate its inset as the chat opened.
+    var isInitialPhase = true
     voiceViewModel.$phase
       .sink { [weak self] phase in
         guard let self else { return }
@@ -1248,9 +1252,10 @@ class GlassComposeAppKit: NSView {
         updateVoiceKeyHandlers(phase: phase)
         guard !isCancellingTranscriptionForRemoval else { return }
         updateVoiceAvailability(phase: phase)
-        updateHeight(animate: true, voicePhase: phase)
+        updateHeight(animate: !isInitialPhase, voicePhase: phase)
       }
       .store(in: &cancellables)
+    isInitialPhase = false
   }
 
   private func updateSilentModeUI(
@@ -2266,10 +2271,21 @@ class GlassComposeAppKit: NSView {
     agentChain.updateDraft(textStorage)
   }
 
+  /// The message a reply or edit is about: from the list's loaded window when it is there (it is, for a message picked
+  /// in the list), else from the database. Two full reads on the main thread were ~20 ms of picking Reply.
+  private func composedMessage(_ msgId: Int64, chatId: Int64) -> FullMessage? {
+    if chatId == (self.chatId ?? 0),
+       let loaded = viewModel?.messages.last(where: { $0.message.messageId == msgId && $0.message.chatId == chatId })
+    {
+      return loaded
+    }
+    return try? FullMessage.get(messageId: msgId, chatId: chatId)
+  }
+
   private func updateAgentReplyTarget(_ replyingToMsgId: Int64?) {
     guard let agentChain else { return }
     let fromID = replyingToMsgId.flatMap { msgId in
-      try? FullMessage.get(messageId: msgId, chatId: chatId ?? 0)?.message.fromId
+      composedMessage(msgId, chatId: chatId ?? 0)?.message.fromId
     }
     agentChain.updateReply(toUserID: fromID)
   }
@@ -2413,7 +2429,7 @@ class GlassComposeAppKit: NSView {
     if let msgId {
       // Update and show the reply view
       let resolvedChatId = sourceChatId ?? chatId ?? 0
-      if let message = try? FullMessage.get(messageId: msgId, chatId: resolvedChatId) {
+      if let message = composedMessage(msgId, chatId: resolvedChatId) {
         messageView.update(with: message, kind: kind)
         messageView.open(animated: animate)
         addReplyEscHandler()

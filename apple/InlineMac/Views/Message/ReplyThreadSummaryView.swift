@@ -28,16 +28,7 @@ final class ReplyThreadSummaryView: NSView {
 
   private var style: EmbeddedMessageView.EmbeddedMessageStyle
   private var avatarViews: [UserAvatarView] = []
-  private var avatarsWidthConstraint: NSLayoutConstraint?
-  private var avatarsToLabelSpacingConstraint: NSLayoutConstraint?
-  private var minWidthConstraint: NSLayoutConstraint?
-  private var unreadDotLeadingConstraint: NSLayoutConstraint?
-  private var unreadDotWidthConstraint: NSLayoutConstraint?
-  private var spinnerWidthConstraint: NSLayoutConstraint?
-  private var avatarsCenterYConstraint: NSLayoutConstraint?
-  private var replyCountCenterYConstraint: NSLayoutConstraint?
-  private var unreadDotCenterYConstraint: NSLayoutConstraint?
-  private var spinnerCenterYConstraint: NSLayoutConstraint?
+  private var hasUnread = false
   private var hasTitle = false
   private var loading = false
   private var trackingAreaRef: NSTrackingArea?
@@ -48,13 +39,11 @@ final class ReplyThreadSummaryView: NSView {
 
   private lazy var avatarsContainer: NSView = {
     let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
   private lazy var titleLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
@@ -66,7 +55,6 @@ final class ReplyThreadSummaryView: NSView {
 
   private lazy var replyCountLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .systemFont(ofSize: NSFont.systemFontSize)
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
@@ -77,7 +65,6 @@ final class ReplyThreadSummaryView: NSView {
 
   private lazy var unreadDotView: NSView = {
     let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     view.layer?.cornerRadius = Constants.unreadDotSize / 2
     return view
@@ -85,7 +72,6 @@ final class ReplyThreadSummaryView: NSView {
 
   private lazy var spinnerView: NSProgressIndicator = {
     let spinner = NSProgressIndicator()
-    spinner.translatesAutoresizingMaskIntoConstraints = false
     spinner.style = .spinning
     spinner.controlSize = .small
     spinner.isDisplayedWhenStopped = false
@@ -132,18 +118,18 @@ final class ReplyThreadSummaryView: NSView {
       countText = "Subthread · \(count)"
     }
     replyCountLabel.stringValue = countText
+    self.hasUnread = hasUnread
     unreadDotView.isHidden = !hasUnread
-    unreadDotLeadingConstraint?.constant = hasUnread ? Constants.contentSpacing : 0
-    unreadDotWidthConstraint?.constant = hasUnread ? Constants.unreadDotSize : 0
     updateAvatars(authors: recentAuthors)
     applyStyle()
+    needsLayout = true
   }
 
   func setLoading(_ loading: Bool) {
     guard self.loading != loading else { return }
     self.loading = loading
     spinnerView.isHidden = !loading
-    spinnerWidthConstraint?.constant = loading ? 12 : 0
+    needsLayout = true
     if loading {
       spinnerView.startAnimation(nil)
     } else {
@@ -154,11 +140,9 @@ final class ReplyThreadSummaryView: NSView {
   func clear() {
     updateTitle(nil)
     replyCountLabel.stringValue = ""
+    hasUnread = false
     unreadDotView.isHidden = true
-    unreadDotLeadingConstraint?.constant = 0
-    unreadDotWidthConstraint?.constant = 0
     updateAvatars(authors: [])
-    spinnerWidthConstraint?.constant = 0
     setLoading(false)
     hovering = false
     setPressed(false)
@@ -166,7 +150,8 @@ final class ReplyThreadSummaryView: NSView {
   }
 
   private func setupView() {
-    translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (message rows' `layoutParts`), and lays out its parts by frame (`layoutParts` here).
+    translatesAutoresizingMaskIntoConstraints = true
     wantsLayer = true
     layer?.masksToBounds = true
     layer?.cornerRadius = Constants.cornerRadius
@@ -178,60 +163,6 @@ final class ReplyThreadSummaryView: NSView {
     addSubview(replyCountLabel)
     addSubview(unreadDotView)
     addSubview(spinnerView)
-
-    avatarsWidthConstraint = avatarsContainer.widthAnchor.constraint(equalToConstant: 0)
-    avatarsToLabelSpacingConstraint = replyCountLabel.leadingAnchor.constraint(
-      equalTo: avatarsContainer.trailingAnchor,
-      constant: 0
-    )
-    minWidthConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: Constants.minWidth)
-    minWidthConstraint?.priority = .defaultHigh
-
-    unreadDotLeadingConstraint = unreadDotView.leadingAnchor.constraint(
-      equalTo: replyCountLabel.trailingAnchor,
-      constant: Constants.contentSpacing
-    )
-    unreadDotWidthConstraint = unreadDotView.widthAnchor.constraint(equalToConstant: Constants.unreadDotSize)
-    spinnerWidthConstraint = spinnerView.widthAnchor.constraint(equalToConstant: 0)
-    avatarsCenterYConstraint = avatarsContainer.centerYAnchor.constraint(equalTo: centerYAnchor)
-    replyCountCenterYConstraint = replyCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
-    unreadDotCenterYConstraint = unreadDotView.centerYAnchor.constraint(equalTo: centerYAnchor)
-    spinnerCenterYConstraint = spinnerView.centerYAnchor.constraint(equalTo: centerYAnchor)
-
-    NSLayoutConstraint.activate([
-      minWidthConstraint!,
-
-      titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.titleTopPadding),
-      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
-      titleLabel.trailingAnchor.constraint(
-        lessThanOrEqualTo: trailingAnchor,
-        constant: -Constants.horizontalPadding
-      ),
-
-      avatarsContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
-      avatarsCenterYConstraint!,
-      avatarsContainer.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
-      avatarsWidthConstraint!,
-
-      avatarsToLabelSpacingConstraint!,
-      replyCountCenterYConstraint!,
-
-      unreadDotLeadingConstraint!,
-      unreadDotCenterYConstraint!,
-      unreadDotWidthConstraint!,
-      unreadDotView.heightAnchor.constraint(equalToConstant: Constants.unreadDotSize),
-
-      spinnerView.leadingAnchor.constraint(
-        greaterThanOrEqualTo: unreadDotView.trailingAnchor,
-        constant: Constants.contentSpacing
-      ),
-      spinnerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
-      spinnerCenterYConstraint!,
-      spinnerWidthConstraint!,
-      spinnerView.heightAnchor.constraint(equalToConstant: 12),
-
-      replyCountLabel.trailingAnchor.constraint(lessThanOrEqualTo: spinnerView.leadingAnchor, constant: -6),
-    ])
 
     applyStyle()
   }
@@ -245,52 +176,94 @@ final class ReplyThreadSummaryView: NSView {
     replyCountLabel.font = .systemFont(
       ofSize: nextHasTitle ? NSFont.smallSystemFontSize : NSFont.systemFontSize
     )
-
-    let rowOffset = nextHasTitle ? Constants.titledRowCenterOffset : 0
-    avatarsCenterYConstraint?.constant = rowOffset
-    replyCountCenterYConstraint?.constant = rowOffset
-    unreadDotCenterYConstraint?.constant = rowOffset
-    spinnerCenterYConstraint?.constant = rowOffset
+    needsLayout = true
   }
 
   private func updateAvatars(authors: [UserInfo]) {
     avatarViews.forEach { $0.removeFromSuperview() }
     avatarViews.removeAll()
 
-    let visibleAuthors = Array(authors.prefix(Constants.maxAvatars))
-    for (index, author) in visibleAuthors.enumerated() {
+    for author in authors.prefix(Constants.maxAvatars) {
       let avatar = UserAvatarView(userInfo: author, size: Constants.avatarSize)
-      avatar.translatesAutoresizingMaskIntoConstraints = false
       avatarsContainer.addSubview(avatar)
       avatarViews.append(avatar)
+    }
+    avatarsContainer.isHidden = avatarViews.isEmpty
+    needsLayout = true
+  }
 
-      let leading: NSLayoutConstraint = if index == 0 {
-        avatar.leadingAnchor.constraint(equalTo: avatarsContainer.leadingAnchor)
-      } else {
-        avatar.leadingAnchor.constraint(
-          equalTo: avatarViews[index - 1].trailingAnchor,
-          constant: -Constants.avatarOverlap
-        )
-      }
+  override func setFrameSize(_ newSize: NSSize) {
+    let changed = newSize != frame.size
+    super.setFrameSize(newSize)
+    if changed { needsLayout = true }
+  }
 
-      NSLayoutConstraint.activate([
-        leading,
-        avatar.centerYAnchor.constraint(equalTo: avatarsContainer.centerYAnchor),
-        avatar.widthAnchor.constraint(equalToConstant: Constants.avatarSize),
-        avatar.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
-      ])
+  override func layout() {
+    super.layout()
+    layoutParts()
+  }
+
+  /// The constraints' geometry, by frame: an optional title on top; then a row (lower by 8 pt under a title) of
+  /// overlapping avatars, the count (shrinking first), the unread dot after it, and the spinner at the trailing edge.
+  /// Message rows place this view by frame, so none of it joins the window's layout engine.
+  private func layoutParts() {
+    let size = bounds.size
+    guard size.width > 0, size.height > 0 else { return }
+    let padding = Constants.horizontalPadding
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
+    func place(_ view: NSView, in container: NSView, x: CGFloat, top: CGFloat, width: CGFloat, height: CGFloat) {
+      let containerSize = container.bounds.size
+      let width = max(0, width), height = max(0, height)
+      let alignmentRect = NSRect(
+        x: mirrored ? containerSize.width - x - width : x,
+        y: containerSize.height - top - height,
+        width: width,
+        height: height
+      )
+      let frame = container.backingAlignedRect(
+        view.frame(forAlignmentRect: alignmentRect), options: .alignAllEdgesNearest
+      )
+      if view.frame != frame { view.frame = frame }
     }
 
-    let visibleCount = visibleAuthors.count
-    avatarsContainer.isHidden = visibleCount == 0
-    avatarsToLabelSpacingConstraint?.constant = visibleCount == 0 ? 0 : Constants.contentSpacing
-
-    let avatarsWidth: CGFloat = if visibleCount == 0 {
-      0
-    } else {
-      Constants.avatarSize + CGFloat(visibleCount - 1) * (Constants.avatarSize - Constants.avatarOverlap)
+    if hasTitle {
+      let title = titleLabel.intrinsicContentSize
+      place(
+        titleLabel, in: self, x: padding, top: Constants.titleTopPadding,
+        width: min(title.width, size.width - 2 * padding), height: title.height
+      )
     }
-    avatarsWidthConstraint?.constant = avatarsWidth
+
+    let rowCenter = size.height / 2 + (hasTitle ? Constants.titledRowCenterOffset : 0)
+    let avatarCount = CGFloat(avatarViews.count)
+    let avatarsWidth = avatarViews.isEmpty
+      ? 0 : Constants.avatarSize + (avatarCount - 1) * (Constants.avatarSize - Constants.avatarOverlap)
+    place(
+      avatarsContainer, in: self, x: padding, top: rowCenter - Constants.avatarSize / 2,
+      width: avatarsWidth, height: Constants.avatarSize
+    )
+    for (index, avatar) in avatarViews.enumerated() {
+      place(
+        avatar, in: avatarsContainer, x: CGFloat(index) * (Constants.avatarSize - Constants.avatarOverlap), top: 0,
+        width: Constants.avatarSize, height: Constants.avatarSize
+      )
+    }
+
+    let spinnerWidth: CGFloat = loading ? 12 : 0
+    let spinnerX = size.width - padding - spinnerWidth
+    place(spinnerView, in: self, x: spinnerX, top: rowCenter - 6, width: spinnerWidth, height: 12)
+
+    let dotLeading = hasUnread ? Constants.contentSpacing : 0
+    let dotWidth = hasUnread ? Constants.unreadDotSize : 0
+    let countX = padding + avatarsWidth + (avatarViews.isEmpty ? 0 : Constants.contentSpacing)
+    let count = replyCountLabel.intrinsicContentSize
+    // The count gives way first: the dot keeps 6 pt from the spinner, the count 6 pt from the dot.
+    let countWidth = min(count.width, spinnerX - Constants.contentSpacing - dotWidth - dotLeading - countX)
+    place(replyCountLabel, in: self, x: countX, top: rowCenter - count.height / 2, width: countWidth, height: count.height)
+    place(
+      unreadDotView, in: self, x: countX + max(0, countWidth) + dotLeading, top: rowCenter - Constants.unreadDotSize / 2,
+      width: dotWidth, height: Constants.unreadDotSize
+    )
   }
 
   private func applyStyle() {

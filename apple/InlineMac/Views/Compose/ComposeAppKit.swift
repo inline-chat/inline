@@ -114,6 +114,17 @@ final class ComposeAppKit: NSView {
     implementation.prepareForMessageSelection()
   }
 
+  private var reportedHeight: CGFloat = 0
+
+  override func layout() {
+    super.layout()
+    // Each frame of the composer's height animation lays it out: the message list follows what is shown.
+    if abs(frame.height - reportedHeight) > 0.01, !isBlockedByBotAccess {
+      reportedHeight = frame.height
+      messageList?.composerHeightDidChange(frame.height)
+    }
+  }
+
   func didLayout() {
     guard !isBlockedByBotAccess else { return }
     let span = PerformanceTrace.begin("ComposeDidLayout", category: .messages)

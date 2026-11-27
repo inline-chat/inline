@@ -38,7 +38,7 @@ final class ChatRouteContainerController: NSViewController {
     NSLayoutConstraint.activate(chatConstraints)
     chat = incoming
 
-    releaseAfterSwitch(outgoing)
+    releaseAfterSwitch(outgoing, incoming: incoming)
   }
 
   func dispose() {
@@ -50,24 +50,49 @@ final class ChatRouteContainerController: NSViewController {
   }
 
   /// Ends the current chat while its view is still in the window, so it records the reading place
-  /// the user saw, then takes it out of the hierarchy.
+  /// the user saw. Its view stays in the hierarchy, transparent, until `releaseAfterSwitch` takes it
+  /// out: leaving the window tells every view in the chat (about 7 ms a switch in the timeline
+  /// journey), which held up the incoming chat's first frame.
   private func detachCurrentChat() -> ChatViewAppKit? {
     guard let current = chat else { return nil }
     chat = nil
-    current.dispose()
+    // Keys must not go on reaching the outgoing chat (its composer) while it waits out of sight.
+    if let window = current.view.window, let responder = window.firstResponder as? NSView,
+       responder.isDescendant(of: current.view)
+    {
+      window.makeFirstResponder(nil)
+    }
+    current.dispose(removingViews: false)
     NSLayoutConstraint.deactivate(chatConstraints)
     chatConstraints = []
-    current.view.removeFromSuperview()
+    current.view.alphaValue = 0
     current.removeFromParent()
     return current
   }
 
-  /// Tearing down a chat's view tree costs tens of milliseconds; keep the outgoing chat alive until
-  /// the next run loop turn so its release lands after the incoming chat's first frame.
-  private func releaseAfterSwitch(_ outgoing: ChatViewAppKit?) {
+  /// Tearing down a chat's view tree costs tens of milliseconds; the outgoing chat leaves the window
+  /// once the incoming chat's first messages are on screen (their frame committed; the switch runs in
+  /// SwiftUI's update, the list places rows in a later layout), and is released a second later. That
+  /// second also removes it when the incoming chat shows none (switched away at once, no Nav3
+  /// signpost); removing twice is harmless.
+  private func releaseAfterSwitch(_ outgoing: ChatViewAppKit?, incoming: ChatViewAppKit? = nil) {
     guard let outgoing else { return }
-    DispatchQueue.main.async {
-      withExtendedLifetime(outgoing) {}
+    // Weak here: work a chat never runs must not keep the outgoing one alive. The fallback holds
+    // it and releases it, after the incoming chat's first frame either way.
+    let remove: () -> Void = { [weak outgoing] in
+      guard let outgoing else { return }
+      outgoing.view.removeFromSuperview()
     }
+    if let incoming {
+      incoming.afterFirstMessages(remove)
+    } else if let nav3 = outgoing.dependencies.nav3 {
+      // A route replaced by another chat's route disposes this container: the next chat's first
+      // messages, whichever chat it is.
+      nav3.afterFirstMessages(peer: nil, remove)
+    } else {
+      DispatchQueue.main.async { outgoing.view.removeFromSuperview() }
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { outgoing.view.removeFromSuperview() }
   }
 }

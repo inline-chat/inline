@@ -30,6 +30,9 @@ enum MessageListPerfCounters {
   private static var measures = 0
   private static var measuresByMessage: [Int64: Int] = [:]
   private static var rebuildReasons: [String: Int] = [:]
+  /// Built rows by the classes in them that use Auto Layout (placed by constraints, or holding their own): any one
+  /// pulls the row into the window's layout engine.
+  private static var constrainedClasses: [String: Int] = [:]
   /// Read passes for the read journey, never reset: at the live end (`liveEndPasses`), of which
   /// `liveEndReads` asked to read the whole chat, and in history (`historyPasses`).
   private(set) static var liveEndPasses = 0
@@ -51,6 +54,8 @@ enum MessageListPerfCounters {
       case .reconfigured: reconfigured += 1
       case .built: built += 1
     }
+    // The timeline list never flushes on its own; batches keep its harness runs readable in the log.
+    if unchanged + resized + reconfigured + built >= 100 { flush("batch") }
   }
 
   /// Counts the hierarchy a freshly built message view starts with, hidden parts included.
@@ -61,6 +66,17 @@ enum MessageListPerfCounters {
     builtLayers += layers
     maxBuiltViews = max(maxBuiltViews, views)
     maxBuiltLayers = max(maxBuiltLayers, layers)
+    var classes = Set<String>()
+    func visit(_ view: NSView) {
+      if !view.translatesAutoresizingMaskIntoConstraints
+        || view.constraints.contains(where: { type(of: $0) == NSLayoutConstraint.self })
+      {
+        classes.insert(String(describing: type(of: view)))
+      }
+      view.subviews.forEach(visit)
+    }
+    visit(view.superview ?? view)
+    for name in classes { constrainedClasses[name, default: 0] += 1 }
   }
 
   /// Why a cell built a new message view: "fresh" for a cell without one, otherwise every reuse
@@ -80,6 +96,14 @@ enum MessageListPerfCounters {
 
     let measuredMessages = measuresByMessage.count
     let maxMeasures = measuresByMessage.values.max() ?? 0
+    os_log(
+      .default,
+      log: textLog,
+      "MessageListCounters reason=%{public}s built=%ld reconfigured=%ld resized=%ld unchanged=%ld %{public}s",
+      reason.description, built, reconfigured, resized, unchanged,
+      (rebuildReasons.sorted { $0.key < $1.key }.map { "rb_\($0.key)=\($0.value)" }
+        + constrainedClasses.sorted { $0.key < $1.key }.map { "cx_\($0.key)=\($0.value)" }).joined(separator: " ")
+    )
     os_signpost(
       .event,
       log: log,
@@ -111,7 +135,10 @@ enum MessageListPerfCounters {
     measures = 0
     measuresByMessage.removeAll(keepingCapacity: true)
     rebuildReasons.removeAll(keepingCapacity: true)
+    constrainedClasses.removeAll(keepingCapacity: true)
   }
+
+  private static let textLog = OSLog(subsystem: "InlineMac", category: "MessageListCounters")
 
   private static func viewCount(_ view: NSView) -> Int {
     view.subviews.reduce(1) { $0 + viewCount($1) }

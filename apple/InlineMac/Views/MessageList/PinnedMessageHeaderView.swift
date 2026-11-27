@@ -211,8 +211,10 @@ final class PinnedMessageHeaderView: NSView {
           .sorted()
       }
       .removeDuplicates()
-      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
-      .receive(on: DispatchQueue.main)
+      // Fetched on a reader, delivered on the main queue: `.immediate` made the main thread wait for a reader at
+      // every chat open (12 ms an open in the harness, behind the open's own reads), and the hop to main deferred
+      // the value anyway. The first frame shows the prepared pin (`initialPinnedMessage`).
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .async(onQueue: .main))
       .sink(
         receiveCompletion: { [weak self] completion in
           self?.log.error("Pinned message observation failed: \(completion)")
@@ -381,8 +383,8 @@ final class PinnedMessageHeaderView: NSView {
       // The message's tables are tracked whole, so most deliveries (a presence update, a message
       // elsewhere) leave it unchanged. Drop those off the main thread instead of reconfiguring.
       .removeDuplicates()
-      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
-      .receive(on: DispatchQueue.main)
+      // Fetched on a reader, delivered on the main queue (see `observePinnedMessages`).
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .async(onQueue: .main))
       .sink(
         receiveCompletion: { [weak self] completion in
           self?.log.error("Pinned message fetch failed: \(completion)")

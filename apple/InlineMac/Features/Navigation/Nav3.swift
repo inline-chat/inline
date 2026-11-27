@@ -150,6 +150,8 @@ class Nav3 {
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   @ObservationIgnored private let persistsActiveSpace: Bool
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
+  /// Work waiting for a chat's first messages on screen (`afterFirstMessages`), by chat (nil: the next chat's).
+  @ObservationIgnored private var afterFirstMessagesWork: [(peer: Peer?, work: () -> Void)] = []
   @ObservationIgnored private var lastUsagePeer: Peer?
   @ObservationIgnored var onRouteChange: (() -> Void)?
   /// Prepares a chat that back, forward or the history menu is moving to, off the main thread like
@@ -579,7 +581,22 @@ class Nav3 {
     )
   }
 
+  /// Runs `work` once the chat's message list has shown its first messages (or failed to): the list ends the chat
+  /// navigation a run loop turn after placing them, so the frame that shows them is already committed. A chat switch
+  /// takes the outgoing chat out of the window then, off the incoming chat's path to its first frame.
+  /// `peer` nil: whichever chat shows its first messages next (a route replaced with a new chat's route).
+  func afterFirstMessages(peer: Peer?, _ work: @escaping () -> Void) {
+    afterFirstMessagesWork.append((peer, work))
+    // Chats switched away from before their first messages never run theirs: keep the queue short.
+    if afterFirstMessagesWork.count > 8 { afterFirstMessagesWork.removeFirst(afterFirstMessagesWork.count - 8) }
+  }
+
   func endChatNavigationSignpost(peer: Peer, reason: String) {
+    if afterFirstMessagesWork.contains(where: { $0.peer == nil || $0.peer == peer }) {
+      let ready = afterFirstMessagesWork.filter { $0.peer == nil || $0.peer == peer }
+      afterFirstMessagesWork.removeAll { $0.peer == nil || $0.peer == peer }
+      for item in ready { item.work() }
+    }
     guard let activeChatNavigation, activeChatNavigation.peer == peer else { return }
     os_signpost(
       .end,

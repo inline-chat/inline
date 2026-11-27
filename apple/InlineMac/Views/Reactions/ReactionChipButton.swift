@@ -3,7 +3,7 @@ import Combine
 import InlineKit
 
 final class ReactionChipButton: NSButton {
-  let emoji: String
+  private(set) var emoji: String
 
   var group: GroupedReaction? {
     didSet {
@@ -104,6 +104,14 @@ final class ReactionChipButton: NSButton {
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  /// Shows another emoji: a reactions view hands a chip it no longer needs to the next emoji instead of building one.
+  func setEmoji(_ next: String) {
+    guard next != emoji else { return }
+    emoji = next
+    emojiLabel.stringValue = next
+    needsLayout = true
   }
 
   override func layout() {
@@ -270,24 +278,31 @@ final class ReactionChipButton: NSButton {
   }
 
   private func rebuildContent(shouldShowAvatars: Bool, group: GroupedReaction) {
-    avatarViews.forEach { $0.removeFromSuperview() }
-    avatarViews.removeAll()
-
-    if shouldShowAvatars {
-      countLabel.isHidden = true
-
-      for fullReaction in group.reactions.prefix(ReactionChipMetrics.maxAvatars) {
-        let avatarView = UserAvatarView(
-          userInfo: userInfo(for: fullReaction) ?? .deleted, size: ReactionChipMetrics.avatarSize
-        )
-        avatarView.translatesAutoresizingMaskIntoConstraints = true
-        avatarView.acceptsMouseInteraction = false
-        addSubview(avatarView)
-        avatarViews.append(avatarView)
-      }
-    } else {
+    guard shouldShowAvatars else {
+      avatarViews.forEach { $0.removeFromSuperview() }
+      avatarViews.removeAll()
       countLabel.isHidden = false
       countLabel.stringValue = "\(group.reactions.count)"
+      return
+    }
+
+    countLabel.isHidden = true
+    // Avatar views stay by position and take the next reactor; later ones stack above earlier ones.
+    let reactions = group.reactions.prefix(ReactionChipMetrics.maxAvatars)
+    for (index, fullReaction) in reactions.enumerated() {
+      let reactor = userInfo(for: fullReaction) ?? .deleted
+      if index < avatarViews.count {
+        avatarViews[index].update(userInfo: reactor, size: ReactionChipMetrics.avatarSize)
+        continue
+      }
+      let avatarView = UserAvatarView(userInfo: reactor, size: ReactionChipMetrics.avatarSize)
+      avatarView.translatesAutoresizingMaskIntoConstraints = true
+      avatarView.acceptsMouseInteraction = false
+      addSubview(avatarView)
+      avatarViews.append(avatarView)
+    }
+    while avatarViews.count > reactions.count {
+      avatarViews.removeLast().removeFromSuperview()
     }
   }
 

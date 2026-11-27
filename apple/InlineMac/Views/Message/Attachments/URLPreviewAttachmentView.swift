@@ -15,25 +15,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     var height: Int
   }
 
-  private struct ViewFrameConstraints {
-    let x: NSLayoutConstraint
-    let y: NSLayoutConstraint
-    let width: NSLayoutConstraint
-    let height: NSLayoutConstraint
-
-    func update(to rect: NSRect) {
-      update(x, rect.origin.x)
-      update(y, rect.origin.y)
-      update(width, rect.width)
-      update(height, rect.height)
-    }
-
-    private func update(_ constraint: NSLayoutConstraint, _ value: CGFloat) {
-      guard constraint.constant != value else { return }
-      constraint.constant = value
-    }
-  }
-
   private(set) var fullAttachment: FullAttachment
   private var message: Message
   private let usesOutgoingBubbleStyle: Bool
@@ -76,7 +57,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   private var tempPreviewImageURL: URL?
   private var pressed = false
   private var layoutPlan: Layout.Plan?
-  private var viewFrameConstraints: [ObjectIdentifier: ViewFrameConstraints] = [:]
   private var previewPhotoRefreshKey: PhotoRefreshKey?
   private var authorPhotoRefreshKey: PhotoRefreshKey?
 
@@ -86,14 +66,14 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var accentView: NSView = {
     let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.wantsLayer = true
     return view
   }()
 
   private lazy var backgroundView: NSView = {
     let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.wantsLayer = true
     view.layer?.cornerRadius = mode == .large ? Layout.largeCornerRadius : Layout.cornerRadius
     view.layer?.masksToBounds = true
@@ -102,7 +82,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var imageContainer: PreviewImageContainerView = {
     let view = PreviewImageContainerView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.wantsLayer = true
     view.layer?.cornerRadius = mode == .large ? 0 : Layout.imageCornerRadius
     view.layer?.masksToBounds = true
@@ -113,7 +93,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var photoView: PlatformPhotoView = {
     let view = PlatformPhotoView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.photoContentMode = .aspectFill
     view.showsTinyThumbnailBackground = true
     view.showsLoadingPlaceholder = true
@@ -124,7 +104,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var authorAvatarView: PlatformPhotoView = {
     let view = PlatformPhotoView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.photoContentMode = .aspectFill
     view.showsTinyThumbnailBackground = true
     view.showsLoadingPlaceholder = true
@@ -138,7 +118,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     label.font = Layout.authorFont
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
-    label.translatesAutoresizingMaskIntoConstraints = false
+    label.translatesAutoresizingMaskIntoConstraints = true
     label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return label
   }()
@@ -148,14 +128,14 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     label.font = Layout.authorSubtitleFont
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
-    label.translatesAutoresizingMaskIntoConstraints = false
+    label.translatesAutoresizingMaskIntoConstraints = true
     label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return label
   }()
 
   private lazy var playIconView: NSImageView = {
     let view = NSImageView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.symbolConfiguration = .init(pointSize: Layout.playIconSize, weight: .medium)
     view.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play")
     view.imageScaling = .scaleProportionallyUpOrDown
@@ -164,7 +144,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var playOverlayView: NSView = {
     let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.wantsLayer = true
     view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.46).cgColor
     view.layer?.cornerRadius = Layout.playOverlaySize / 2
@@ -175,7 +155,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var providerPlaceholderView: NSImageView = {
     let view = NSImageView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.imageScaling = .scaleProportionallyUpOrDown
     view.isHidden = true
     return view
@@ -186,7 +166,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     label.font = Layout.titleFont
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
-    label.translatesAutoresizingMaskIntoConstraints = false
+    label.translatesAutoresizingMaskIntoConstraints = true
     label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return label
   }()
@@ -196,7 +176,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     label.font = mode == .large ? Layout.largeDescriptionFont : Layout.compactDescriptionFont
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
-    label.translatesAutoresizingMaskIntoConstraints = false
+    label.translatesAutoresizingMaskIntoConstraints = true
     label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return label
   }()
@@ -232,7 +212,8 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     wantsLayer = true
     layer?.cornerRadius = mode == .large ? Layout.largeCornerRadius : Layout.cornerRadius
     layer?.masksToBounds = true
-    translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`MessageAttachmentsView`), and places its parts by frame from the layout plan.
+    translatesAutoresizingMaskIntoConstraints = true
     PressScaleAnimator.prepare(self)
     accentView.isHidden = mode == .large
 
@@ -451,34 +432,16 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     setConstrainedFrame(frame?.rect ?? .zero, for: view)
   }
 
+  /// Places `view` at the plan's `frame` (origin at its superview's top leading corner), as its leading, top, width
+  /// and height constraints did: mirrored in right-to-left, measured from the bottom in an unflipped superview.
   private func setConstrainedFrame(_ frame: NSRect, for view: NSView) {
-    frameConstraints(for: view).update(to: frame)
-  }
-
-  private func frameConstraints(for view: NSView) -> ViewFrameConstraints {
-    let id = ObjectIdentifier(view)
-    if let constraints = viewFrameConstraints[id] {
-      return constraints
-    }
-
-    guard let superview = view.superview else {
-      preconditionFailure("Expected \(type(of: view)) to have a superview before applying URL preview layout")
-    }
-
-    let constraints = ViewFrameConstraints(
-      x: view.leadingAnchor.constraint(equalTo: superview.leadingAnchor),
-      y: view.topAnchor.constraint(equalTo: superview.topAnchor),
-      width: view.widthAnchor.constraint(equalToConstant: 0),
-      height: view.heightAnchor.constraint(equalToConstant: 0)
-    )
-    NSLayoutConstraint.activate([
-      constraints.x,
-      constraints.y,
-      constraints.width,
-      constraints.height,
-    ])
-    viewFrameConstraints[id] = constraints
-    return constraints
+    guard let superview = view.superview else { return }
+    let size = superview.bounds.size
+    var rect = frame
+    if superview.userInterfaceLayoutDirection == .rightToLeft { rect.origin.x = size.width - frame.maxX }
+    if !superview.isFlipped { rect.origin.y = size.height - frame.maxY }
+    let placed = superview.backingAlignedRect(view.frame(forAlignmentRect: rect), options: .alignAllEdgesNearest)
+    if view.frame != placed { view.frame = placed }
   }
 
   private func refreshPreviewPhotoIfNeeded() {

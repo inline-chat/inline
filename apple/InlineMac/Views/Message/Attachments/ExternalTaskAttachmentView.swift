@@ -23,28 +23,8 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
 
   // MARK: - UI
 
-  private lazy var contentStackView = {
-    let stackView = NSStackView()
-    stackView.orientation = .vertical
-    stackView.spacing = 2
-    stackView.alignment = .leading
-    return stackView
-  }()
-
-  private lazy var firstLineStackView = {
-    let stackView = NSStackView()
-    stackView.orientation = .horizontal
-    stackView.spacing = Self.spacing
-    return stackView
-  }()
-
-  private lazy var secondLineStackView = {
-    let stackView = NSStackView()
-    stackView.orientation = .horizontal
-    stackView.spacing = Self.spacing
-
-    return stackView
-  }()
+  /// Space between the two lines (the creator over the task).
+  private static let lineSpacing: CGFloat = 2
 
   private lazy var titleLabel = {
     let label = NSTextField()
@@ -62,11 +42,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
 
   private var userAvatarView: UserAvatarView?
 
-  private lazy var taskSquareView = {
-    let view = TaskSquareView(isOutgoing: usesOutgoingBubbleStyle)
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
+  private lazy var taskSquareView = TaskSquareView(isOutgoing: usesOutgoingBubbleStyle)
 
   private lazy var taskCreatorLabel = {
     let label = NSTextField()
@@ -109,34 +85,14 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     // background view
     wantsLayer = true
     layer?.cornerRadius = Self.cornerRadius
-    translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`MessageAttachmentsView`, at the plan's height, at least `Theme.externalTaskViewHeight`), and
+    // places its parts by frame (`layoutParts`).
+    translatesAutoresizingMaskIntoConstraints = true
 
-    // content stack view
-    addSubview(contentStackView)
-    contentStackView.addArrangedSubview(firstLineStackView)
-    contentStackView.addArrangedSubview(secondLineStackView)
-
-    // Task Creator (will be added conditionally)
-    firstLineStackView.addArrangedSubview(taskCreatorLabel)
-
-    // Task Square
-    secondLineStackView.addArrangedSubview(taskSquareView)
-
-    // Title
-    secondLineStackView.addArrangedSubview(titleLabel)
-
-    // Setup constraints
-    contentStackView.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([
-      // View
-      heightAnchor.constraint(greaterThanOrEqualToConstant: Theme.externalTaskViewHeight),
-
-      // Content stack view
-      contentStackView.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding),
-      contentStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding),
-      contentStackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Self.padding),
-      contentStackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Self.padding),
-    ])
+    // The creator (after the creator's avatar when there is one), then the task square and title.
+    addSubview(taskCreatorLabel)
+    addSubview(taskSquareView)
+    addSubview(titleLabel)
 
     // Click
     let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
@@ -164,8 +120,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
 
       // Create and add new avatar
       let avatarView = UserAvatarView(userInfo: taskCreator, size: ExternalTaskAttachmentView.avatarSize)
-      avatarView.translatesAutoresizingMaskIntoConstraints = false
-      firstLineStackView.insertArrangedSubview(avatarView, at: 0)
+      addSubview(avatarView)
       userAvatarView = avatarView
 
       // Update task creator label
@@ -181,6 +136,57 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
 
     // Title
     titleLabel.stringValue = externalTask.title ?? "Untitled"
+    needsLayout = true
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    let changed = newSize != frame.size
+    super.setFrameSize(newSize)
+    if changed { needsLayout = true }
+  }
+
+  override func layout() {
+    super.layout()
+    layoutParts()
+  }
+
+  /// The stacks' geometry, by frame: from the top leading corner inside the padding, a line with the creator's avatar
+  /// and the creator, then a line with the task square and title; items vertically centered on their line, labels
+  /// truncated at the trailing padding.
+  private func layoutParts() {
+    let size = bounds.size
+    guard size.width > 0, size.height > 0 else { return }
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
+    let maxX = size.width - Self.padding
+    func place(_ view: NSView, x: CGFloat, centerY: CGFloat, width: CGFloat, height: CGFloat) {
+      let width = max(0, min(width, maxX - x))
+      let alignmentRect = NSRect(
+        x: mirrored ? size.width - x - width : x,
+        y: size.height - centerY - height / 2,
+        width: width,
+        height: height
+      )
+      let frame = backingAlignedRect(view.frame(forAlignmentRect: alignmentRect), options: .alignAllEdgesNearest)
+      if view.frame != frame { view.frame = frame }
+    }
+    func line(_ items: [(NSView, NSSize)], top: CGFloat) -> CGFloat {
+      let height = items.map(\.1.height).max() ?? 0
+      var x = Self.padding
+      for (view, itemSize) in items {
+        place(view, x: x, centerY: top + height / 2, width: itemSize.width, height: itemSize.height)
+        x += itemSize.width + Self.spacing
+      }
+      return height
+    }
+    let avatar = NSSize(width: Self.avatarSize, height: Self.avatarSize)
+    let square = NSSize(width: TaskSquareView.size, height: TaskSquareView.size)
+    let firstLine = (userAvatarView.map { [($0 as NSView, avatar)] } ?? [])
+      + [(taskCreatorLabel as NSView, taskCreatorLabel.intrinsicContentSize)]
+    let firstHeight = line(firstLine, top: Self.padding)
+    _ = line(
+      [(taskSquareView, square), (titleLabel, titleLabel.intrinsicContentSize)],
+      top: Self.padding + firstHeight + Self.lineSpacing
+    )
   }
 
   // MARK: - Computed Properties
@@ -351,9 +357,8 @@ class TaskSquareView: NSView {
 
   private func setupView() {
     wantsLayer = true
-    // Set the fixed size for the checkbox
-    widthAnchor.constraint(equalToConstant: Self.size).isActive = true
-    heightAnchor.constraint(equalToConstant: Self.size).isActive = true
+    // Placed by frame at `size` × `size` (`ExternalTaskAttachmentView.layoutParts`).
+    frame.size = NSSize(width: Self.size, height: Self.size)
   }
 
   public func configure(isOutgoing: Bool) {

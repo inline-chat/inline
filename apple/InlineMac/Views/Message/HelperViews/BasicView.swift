@@ -211,7 +211,7 @@ final class MessageBubbleTailView: NSView {
   var bubbleSize: CGSize = .zero {
     didSet {
       guard bubbleSize != oldValue else { return }
-      updateVisibility()
+      updateLayerGeometry()
     }
   }
 
@@ -222,8 +222,16 @@ final class MessageBubbleTailView: NSView {
   private(set) var side: Side = .none
 
   private var fillColor: NSColor = .clear
+  /// The tail's fill. Core Animation draws it from the path, so the view itself draws
+  /// nothing and has no backing store to fill when rows are configured or appear.
+  private let fillLayer = CAShapeLayer()
   private let lightingLayer = MessageBubbleLightingLayer()
   private let lightingMaskLayer = CAShapeLayer()
+  /// What the fill and mask paths were built for.
+  private var appliedGeometry: (side: Side, radius: CGFloat, bounds: CGRect)?
+  /// What the fill color was resolved from.
+  private var appliedFill: (color: NSColor, appearance: NSAppearance.Name)?
+  private var fillAlpha: CGFloat = 0
 
   override var isFlipped: Bool { true }
 
@@ -231,6 +239,9 @@ final class MessageBubbleTailView: NSView {
     super.init(frame: .zero)
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
+    layer?.masksToBounds = false
+    fillLayer.fillColor = nil
+    layer?.addSublayer(fillLayer)
     lightingLayer.mask = lightingMaskLayer
     layer?.addSublayer(lightingLayer)
   }
@@ -246,20 +257,12 @@ final class MessageBubbleTailView: NSView {
 
   override func layout() {
     super.layout()
-    updateLightingLayerGeometry()
-  }
-
-  override func draw(_ dirtyRect: NSRect) {
-    guard side != .none else { return }
-
-    guard let path = Self.path(for: side, radius: cornerRadius, in: bounds) else { return }
-    resolvedFillColor.setFill()
-    NSBezierPath(cgPath: path).fill()
+    updateLayerGeometry()
   }
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
-    updateVisibility()
+    updateFill()
   }
 
   func configure(side: Side, color: NSColor, animated: Bool = false) {
@@ -272,7 +275,8 @@ final class MessageBubbleTailView: NSView {
 
     self.side = side
     fillColor = color
-    updateVisibility()
+    updateFill()
+    updateLayerGeometry()
   }
 
   func configureContinuousGradient(topAlpha: CGFloat, bottomAlpha: CGFloat) {
@@ -291,25 +295,41 @@ final class MessageBubbleTailView: NSView {
     lightingLayer.clearWindowVector()
   }
 
-  private func updateVisibility() {
-    isHidden = side == .none || resolvedFillColor.alphaComponent <= 0.01
-    updateLightingLayerGeometry()
-    needsDisplay = true
+  /// Resolves the fill color for the current appearance. Re-parenting a row reports an
+  /// appearance change without one, so an unchanged color and appearance are skipped.
+  private func updateFill() {
+    let appearance = effectiveAppearance.name
+    if appliedFill?.color.isEqual(fillColor) != true || appliedFill?.appearance != appearance {
+      appliedFill = (fillColor, appearance)
+      let resolved = fillColor.resolvedColor(with: effectiveAppearance)
+      fillAlpha = resolved.alphaComponent
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      fillLayer.fillColor = resolved.cgColor
+      CATransaction.commit()
+    }
+    let hidden = side == .none || fillAlpha <= 0.01
+    if isHidden != hidden { isHidden = hidden }
   }
 
-  private func updateLightingLayerGeometry() {
-    guard let layer else { return }
+  /// Builds the tail path when the side, radius or bounds change, for the fill and the lighting mask.
+  private func updateLayerGeometry() {
+    let radius = cornerRadius
+    if let appliedGeometry, appliedGeometry.side == side, appliedGeometry.radius == radius,
+       appliedGeometry.bounds == bounds
+    {
+      return
+    }
+    appliedGeometry = (side, radius, bounds)
+    let path = Self.path(for: side, radius: radius, in: bounds)
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+    fillLayer.frame = bounds
+    fillLayer.path = path
     lightingLayer.frame = bounds
     lightingMaskLayer.frame = bounds
-    lightingMaskLayer.path = Self.path(for: side, radius: cornerRadius, in: bounds)
-    layer.masksToBounds = false
+    lightingMaskLayer.path = path
     CATransaction.commit()
-  }
-
-  private var resolvedFillColor: NSColor {
-    fillColor.resolvedColor(with: effectiveAppearance)
   }
 
   private func animateRemovedTail(side: Side, color: NSColor) {

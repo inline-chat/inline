@@ -108,4 +108,12 @@ struct MessageViewProps: Equatable, Codable, Hashable {
     lhs.isFirstMessage = rhs.isFirstMessage
     return lhs.equalExceptSize(rhs)
   }
+
+  /// `equalExceptSizeAndGroupPosition`, also ignoring whether the row starts its group. A bubble row places its parts
+  /// from the plan on every layout pass, and the plan's shape covers the name and avatar `firstInGroup` decides.
+  func equalExceptSizeAndAnyGroupPosition(_ rhs: MessageViewProps) -> Bool {
+    var lhs = self
+    lhs.firstInGroup = rhs.firstInGroup
+    return lhs.equalExceptSizeAndGroupPosition(rhs)
+  }
 }

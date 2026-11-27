@@ -52,11 +52,10 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
       headerFillColor: context.palette.subtleFill
     )
 
-    let indices = Set(cells.indices)
-    for index in Array(cellViews.keys) where !indices.contains(index) {
-      if let removed = cellViews.removeValue(forKey: index) {
-        removed.removeFromSuperview()
-      }
+    // Surfaces for cells this table lacks stay, hidden, for the next table (making one, with its text view, was most
+    // of a table's bind).
+    for (index, view) in cellViews where index >= cells.count && !view.isHidden {
+      view.isHidden = true
     }
     for (index, cell) in cells.enumerated() {
       let view = cellViews[index] ?? {
@@ -65,6 +64,7 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
         canvasView.addSubview(view)
         return view
       }()
+      if view.isHidden { view.isHidden = false }
       view.apply(
         text: context.tableText(for: cell, isRTL: table.isRTL),
         linkColor: context.palette.link,
@@ -109,10 +109,10 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    // The cell surfaces stay for the next table; the next `apply` gives them its text and hides the ones it lacks.
     for view in cellViews.values {
-      view.removeFromSuperview()
+      view.prepareForReuse()
     }
-    cellViews.removeAll(keepingCapacity: true)
     cells = []
     contentWidth = 0
     canvasView.apply(cells: [], separatorColor: .clear, headerFillColor: .clear)

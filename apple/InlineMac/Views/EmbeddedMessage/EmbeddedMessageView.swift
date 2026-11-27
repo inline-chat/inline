@@ -120,6 +120,87 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
 
   private var isCollapsed = false
 
+  /// The height this view takes when a parent places it by frame (`usesFrameLayout()`).
+  var preferredHeight: CGFloat {
+    isCollapsed ? 0 : expandedHeight
+  }
+
+  /// Set by `usesFrameLayout()`: the bar, thumbnail and labels are placed in `layout()` from the same numbers
+  /// the constraints use, and no constraint is active, so a message row holding this view stays out of the
+  /// window's layout engine.
+  private var usesFrames = false
+
+  /// Lets a parent place this view by frame, as message rows do.
+  func usesFrameLayout() {
+    guard !usesFrames else { return }
+    usesFrames = true
+    translatesAutoresizingMaskIntoConstraints = true
+    // Setup's constraints: those between this view and its parts are held here; the bar's width and the name's
+    // height by those views.
+    NSLayoutConstraint.deactivate(constraints.filter { type(of: $0) == NSLayoutConstraint.self })
+    NSLayoutConstraint.deactivate([rectangleWidthConstraint, nameLabelHeightConstraint].compactMap { $0 })
+    NSLayoutConstraint.deactivate(photoConstraints)
+    rectangleView.translatesAutoresizingMaskIntoConstraints = true
+    nameLabel.translatesAutoresizingMaskIntoConstraints = true
+    messageLabel.translatesAutoresizingMaskIntoConstraints = true
+    simplePhotoView?.translatesAutoresizingMaskIntoConstraints = true
+    needsLayout = true
+  }
+
+  override func layout() {
+    super.layout()
+    if usesFrames { layoutByFrames() }
+  }
+
+  /// The constraints' geometry: bar at the leading edge (inset vertically in compose kinds), thumbnail centered after
+  /// it, then the name over the message, both up to the trailing padding.
+  private func layoutByFrames() {
+    let size = bounds.size
+    guard size.width > 0, size.height > 0 else { return }
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
+    func place(_ view: NSView, x: CGFloat, top: CGFloat, width: CGFloat, height: CGFloat) {
+      let width = max(0, width), height = max(0, height)
+      let alignmentRect = NSRect(
+        x: mirrored ? size.width - x - width : x,
+        y: size.height - top - height,
+        width: width,
+        height: height
+      )
+      let frame = backingAlignedRect(view.frame(forAlignmentRect: alignmentRect), options: .alignAllEdgesNearest)
+      if view.frame != frame { view.frame = frame }
+    }
+
+    let barWidth = showsLeadingBar ? Constants.rectangleWidth : 0
+    let barInset = barVerticalInset
+    place(rectangleView, x: 0, top: barInset, width: barWidth, height: size.height - 2 * barInset)
+
+    let textX: CGFloat
+    if let simplePhotoView {
+      let photoX = barWidth + Constants.contentSpacing
+      place(
+        simplePhotoView,
+        x: photoX,
+        top: (size.height - Constants.photoHeight) / 2,
+        width: Constants.photoWidth,
+        height: Constants.photoHeight
+      )
+      textX = photoX + Constants.photoWidth + Constants.contentSpacing
+    } else {
+      textX = barWidth + (showsLeadingBar ? Constants.contentSpacing : textLeadingPadding)
+    }
+    let textWidth = size.width - textX - textTrailingPadding
+    let verticalPadding = isCollapsed ? 0 : Constants.verticalPadding
+    let nameHeight = isCollapsed ? 0 : nameLabelHeight
+    place(nameLabel, x: textX, top: verticalPadding, width: textWidth, height: nameHeight)
+    place(
+      messageLabel,
+      x: textX,
+      top: verticalPadding + nameHeight,
+      width: textWidth,
+      height: size.height - 2 * verticalPadding - nameHeight
+    )
+  }
+
   private var textColor: NSColor {
     if style == .colored {
       .labelColor
@@ -317,6 +398,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     nameLabelHeightConstraint?.constant = nameHeight
     nameLabelTopConstraint?.constant = verticalPadding
     messageLabelBottomConstraint?.constant = -verticalPadding
+    if usesFrames { needsLayout = true }
   }
 
   func setRelatedMessage(_ message: Message) {
@@ -519,14 +601,17 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     applyResolvedStyle()
   }
 
-  private func updateLabelLayout() {
-    let nameLabelHeight: CGFloat
+  private var nameLabelHeight: CGFloat {
     if kind == .pinnedInHeader {
-      nameLabelHeight = ceil(senderFont.ascender - senderFont.descender + senderFont.leading)
+      ceil(senderFont.ascender - senderFont.descender + senderFont.leading)
     } else {
-      nameLabelHeight = Theme.messageNameLabelHeight
+      Theme.messageNameLabelHeight
     }
+  }
+
+  private func updateLabelLayout() {
     nameLabelHeightConstraint?.constant = nameLabelHeight
+    if usesFrames { needsLayout = true }
   }
 
   private func applyBackgroundAppearance() {
@@ -539,17 +624,23 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     rectangleView.isHidden = !showsLeadingBar
     rectangleWidthConstraint?.constant = showsLeadingBar ? Constants.rectangleWidth : 0
     textLeadingConstraint?.constant = leadingPadding
+    if usesFrames { needsLayout = true }
   }
 
-  private func applyLeadingBarVerticalInsets() {
-    let verticalInset: CGFloat = switch kind {
+  private var barVerticalInset: CGFloat {
+    switch kind {
       case .replyingInCompose, .editingInCompose, .forwardingInCompose:
         Constants.verticalPadding
       case .replyInMessage, .pinnedInHeader:
         0
     }
+  }
+
+  private func applyLeadingBarVerticalInsets() {
+    let verticalInset = barVerticalInset
     rectangleTopConstraint?.constant = verticalInset
     rectangleBottomConstraint?.constant = -verticalInset
+    if usesFrames { needsLayout = true }
   }
 
   private func applyTextPadding() {
@@ -558,6 +649,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     if !showsLeadingBar {
       textLeadingConstraint?.constant = textLeadingPadding
     }
+    if usesFrames { needsLayout = true }
   }
 
   private func applyResolvedStyle() {
@@ -632,6 +724,12 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
         )
         simplePhotoView = photoView
         addSubview(photoView)
+        if usesFrames {
+          // Its own size constraints stay (32×32, as the frame); the frame places it.
+          photoView.translatesAutoresizingMaskIntoConstraints = true
+          needsLayout = true
+          return
+        }
 
         photoConstraints = [
           photoView.leadingAnchor.constraint(
@@ -652,6 +750,10 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       if let photoView = simplePhotoView {
         photoView.removeFromSuperview()
         simplePhotoView = nil
+        if usesFrames {
+          needsLayout = true
+          return
+        }
 
         NSLayoutConstraint.deactivate(photoConstraints)
         photoConstraints = []

@@ -254,16 +254,15 @@ class MessageSizeCalculator {
     case .minimal:
       Self.minimalHoverSideInset + Self.minimalHoverContentInset
     }
-    // Centered chats use the column as their outer limit. Full-width chats keep
-    // the earlier per-message caps so text stays readable in a wide window.
+    // Bubbles keep their width cap in both layouts (the centered column alone let them grow to ~680 pt). Minimal
+    // messages in a centered chat use the column as their outer limit; full width keeps their cap.
     let reservedWidth = leadingSafeWidth + trailingSafeWidth + Self.extraSafeWidth
     let availableWidth = max(0, ceiledWidth - reservedWidth)
-    guard !AppSettings.shared.centeredChats else { return availableWidth }
     switch style {
     case .bubble:
       return min(availableWidth, Self.maxMessageWidth)
     case .minimal:
-      return min(availableWidth, Self.minimalMaxMessageWidth)
+      return AppSettings.shared.centeredChats ? availableWidth : min(availableWidth, Self.minimalMaxMessageWidth)
     }
   }
 
@@ -1015,6 +1014,10 @@ class MessageSizeCalculator {
         widgetLayout: MessageWidgetHeights.shared.layout(for: message.message),
         actions: message.message.actions
       )
+      // streaming: a streaming rich body is planned at what it has revealed, a line or a block at a time.
+      if let plan = richBlockPlan, let revealed = MessageStreamPacer.shared.revealedLength(for: message.id) {
+        richBlockPlan = plan.revealing(revealed, attributedText: attributedString, baseFontSize: fontSize) ?? plan
+      }
       if let richBlockPlan {
         if !richBlockPlan.claimedActionIDs.isEmpty {
           renderableActionRows = BlockInlineActions.renderableRows(
@@ -1083,6 +1086,11 @@ class MessageSizeCalculator {
       }
     }
 
+    // streaming: a streaming message is planned at its revealed lines (the text cache keeps the whole text's size).
+    let uncappedTextSize = textSize
+    if richBlockPlan == nil, hasText {
+      textSize = revealedTextSize(textSize, attributedString, width: availableWidth, isRtl: props.isRtl, message: message)
+    }
     let textHeight = textSize?.height ?? 0.0
     let textWidth = textSize?.width ?? 0.0
 
@@ -1749,7 +1757,7 @@ class MessageSizeCalculator {
     // Fitting width
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
-    if richBlockPlan == nil, let textSize {
+    if richBlockPlan == nil, let textSize = uncappedTextSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
@@ -1844,6 +1852,10 @@ class MessageSizeCalculator {
         fillsAvailableWidth: props.isRtl,
         actions: message.message.actions
       )
+      // streaming: a streaming rich body is planned at what it has revealed, a line or a block at a time.
+      if let plan = richBlockPlan, let revealed = MessageStreamPacer.shared.revealedLength(for: message.id) {
+        richBlockPlan = plan.revealing(revealed, attributedText: attributedString, baseFontSize: fontSize) ?? plan
+      }
       if let richBlockPlan {
         if !richBlockPlan.claimedActionIDs.isEmpty {
           renderableActionRows = BlockInlineActions.renderableRows(
@@ -1958,6 +1970,13 @@ class MessageSizeCalculator {
       textSize = calculateSizeForAttributedString(attributedString, width: textAvailableWidth, isRtl: props.isRtl, message: message)
     }
 
+    // streaming: a streaming message is planned at its revealed lines (the text cache keeps the whole text's size).
+    let uncappedTextSize = textSize
+    if richBlockPlan == nil, hasText {
+      textSize = revealedTextSize(
+        textSize, attributedString, width: textAvailableWidth, isRtl: props.isRtl, message: message
+      )
+    }
     let measuredTextHeight = textSize?.height ?? 0
     let measuredTextWidth = textSize?.width ?? 0
 
@@ -2379,7 +2398,7 @@ class MessageSizeCalculator {
       plan.wrapper.size.height += Self.acknowledgementStandaloneFooterHeight
     }
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
-    if richBlockPlan == nil, let textSize {
+    if richBlockPlan == nil, let textSize = uncappedTextSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
@@ -2456,6 +2475,25 @@ class MessageSizeCalculator {
 
 //    return CGSize(width: textWidth, height: textHeight)
 //  }
+
+  /// A streaming message (`MessageStreamPacer`) is planned at its revealed lines, as the iOS planner does: the text box
+  /// keeps its final width and ends at the line holding the revealed count, so the bubble and row grow a line at a time
+  /// as the reveal goes on (the list re-plans the row when the count enters a new line). Core Text text only; text on
+  /// TextKit shows whole.
+  private func revealedTextSize(
+    _ size: NSSize?, _ text: NSAttributedString, width: CGFloat, isRtl: Bool, message: FullMessage
+  ) -> NSSize? {
+    guard let size, let revealed = MessageStreamPacer.shared.revealedLength(for: message.id),
+          CoreTextMessageText.isEnabled, text.length > 0, revealed < text.length, CoreTextMessageText.supports(text)
+    else { return size }
+    let layout = CoreTextMessageText.layout(text, isRtl: isRtl, width: width)
+    guard let last = layout.lines.last,
+          let frontier = layout.lines.firstIndex(where: { NSMaxRange($0.range) > max(0, revealed) })
+    else { return size }
+    let hidden = last.frame.maxY - layout.lines[frontier].frame.maxY
+    guard hidden > 0.5 else { return size }
+    return NSSize(width: size.width, height: max(1, size.height - floor(hidden)))
+  }
 
   private func calculateSizeForAttributedString(
     _ attributedString: NSAttributedString,

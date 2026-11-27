@@ -32,6 +32,11 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
 
   private let backgroundView = CoreTextBackgroundView()
   private let glyphView = CoreTextGlyphView()
+  /// streaming: characters drawn while the message streams (`CoreTextGlyphView.revealedLength`); nil draws all.
+  var revealedLength: Int? {
+    get { glyphView.revealedLength }
+    set { glyphView.revealedLength = newValue }
+  }
   /// A width change waiting for the next layout pass. A reused row gets the new message's
   /// width before its text, so laying out right away would typeset the old text for nothing.
   private var needsLayoutRebuild = false
@@ -643,19 +648,20 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
 
 /// Code block backgrounds and the list's selection, beneath the glyphs, as MessageTextView
 /// draws them. Its own view, so a selection drag repaints these rectangles, not the text.
+/// Hidden while it has nothing to draw, so most rows don't display it or keep a backing store.
 @MainActor
 final class CoreTextBackgroundView: NSView {
   var codeBlocks: [CodeBlockBox] = [] {
-    didSet { if codeBlocks != oldValue { needsDisplay = true } }
+    didSet { if codeBlocks != oldValue { contentDidChange() } }
   }
 
   var paint: NSAttributedString? {
-    didSet { if paint !== oldValue { needsDisplay = true } }
+    didSet { if paint !== oldValue { contentDidChange() } }
   }
 
   /// List selection, in the owner's coordinates.
   var selectionBands: [CGRect] = [] {
-    didSet { if selectionBands != oldValue { needsDisplay = true } }
+    didSet { if selectionBands != oldValue { contentDidChange() } }
   }
 
   override var isFlipped: Bool { true }
@@ -665,7 +671,14 @@ final class CoreTextBackgroundView: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
+    isHidden = true
     setAccessibilityElement(false)
+  }
+
+  private func contentDidChange() {
+    let isEmpty = codeBlocks.isEmpty && selectionBands.isEmpty
+    if isHidden != isEmpty { isHidden = isEmpty }
+    if !isEmpty { needsDisplay = true }
   }
 
   @available(*, unavailable)
@@ -710,12 +723,18 @@ final class CoreTextBackgroundView: NSView {
 /// Draws a prepared layout: highlights, decorations and glyphs. It sits
 /// `CoreTextMessageView.bleed` outside its owner on every side so overhanging ink isn't clipped,
 /// and never takes events.
+///
+/// The drawing happens in a plain sublayer, not in AppKit's view drawing. AppKit draws a view only inside the visible
+/// rect its clipping ancestors leave it, and drops a redraw requested outside it. So in the message list a row that
+/// came on screen during a fling before the list's model reached it showed its bubble without text, for a frame or
+/// more. A layer marked for display draws in the next Core Animation commit wherever it sits, as Telegram's
+/// `TextViewLayer` does, and an edit redraws in the same commit as the new layout, so text never flickers.
 @MainActor
 final class CoreTextGlyphView: NSView {
   var textLayout: TextLayout = .empty {
     didSet {
       inkGapCache.removeAll()
-      needsDisplay = true
+      glyphLayer.setNeedsDisplay()
     }
   }
 
@@ -724,8 +743,65 @@ final class CoreTextGlyphView: NSView {
     didSet {
       colorRuns = Self.colorRuns(in: paint)
       inkGapCache.removeAll()
-      needsDisplay = true
+      glyphLayer.setNeedsDisplay()
     }
+  }
+
+  /// streaming: while a message streams (`MessageStreamPacer`), only its first `revealedLength` characters draw; the
+  /// line holding the last one fades in over `revealFadeWidth`, as on iOS. Nil draws everything.
+  var revealedLength: Int? {
+    didSet { if revealedLength != oldValue { glyphLayer.setNeedsDisplay() } }
+  }
+
+  static let revealFadeWidth: CGFloat = 24
+
+  private let glyphLayer = CoreTextGlyphLayer()
+  /// The appearance the glyphs were last drawn for: AppKit reports an appearance change on every re-parent, and a
+  /// reused row would redraw its text for nothing.
+  private var drawnAppearance: NSAppearance.Name?
+
+  // The view itself draws nothing (no backing store); its sublayer does.
+  override var wantsUpdateLayer: Bool { true }
+  override func updateLayer() {}
+
+  /// A redraw asked of the view (appearance changes, AppKit) goes to the sublayer.
+  override var needsDisplay: Bool {
+    get { super.needsDisplay }
+    set { if newValue { glyphLayer.setNeedsDisplay() } }
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    placeGlyphLayer()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    placeGlyphLayer()
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    placeGlyphLayer()
+    glyphLayer.setNeedsDisplay()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    let name = effectiveAppearance.name
+    guard name != drawnAppearance else { return }
+    drawnAppearance = name
+    glyphLayer.setNeedsDisplay()
+  }
+
+  private func placeGlyphLayer() {
+    let scale = backingScale
+    guard glyphLayer.frame != bounds || glyphLayer.contentsScale != scale else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    glyphLayer.frame = bounds
+    glyphLayer.contentsScale = scale
+    CATransaction.commit()
   }
 
   /// Foreground colors by text range, in order, so drawing doesn't look up each glyph.
@@ -745,8 +821,11 @@ final class CoreTextGlyphView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    layerContentsRedrawPolicy = .onSetNeedsDisplay
+    layerContentsRedrawPolicy = .never
     setAccessibilityElement(false)
+    glyphLayer.owner = self
+    layer?.addSublayer(glyphLayer)
+    placeGlyphLayer()
   }
 
   @available(*, unavailable)
@@ -784,15 +863,27 @@ final class CoreTextGlyphView: NSView {
     return fallback
   }
 
-  override func draw(_ dirtyRect: NSRect) {
-    guard let context = NSGraphicsContext.current?.cgContext else { return }
+  /// The layer's drawing, in this view's flipped coordinates, under its appearance (the fallback text color is a
+  /// dynamic color).
+  fileprivate func drawGlyphs(in context: CGContext, dirtyRect: NSRect) {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      drawContents(in: context, dirtyRect: dirtyRect)
+    }
+  }
+
+  private func drawContents(in context: CGContext, dirtyRect: NSRect) {
     let bleed = CoreTextMessageView.bleed
     context.saveGState()
     context.translateBy(x: bleed, y: bleed)
     let rect = dirtyRect.offsetBy(dx: -bleed, dy: -bleed)
+    let reveal = self.reveal
+    context.textMatrix = .identity
 
     let text = paint
     let fullRange = NSRange(location: 0, length: text.length == textLayout.length ? text.length : 0)
+    // streaming: highlights and decorations stay inside the revealed part.
+    context.saveGState()
+    if let reveal { context.clip(to: revealedRegion(reveal, bleed: bleed)) }
     if fullRange.length > 0 {
       // Background colors (highlights) fill the font's ascent and descent around the baseline,
       // as TextKit draws them, with the sides floored to pixels.
@@ -819,34 +910,113 @@ final class CoreTextGlyphView: NSView {
     if fullRange.length > 0 {
       drawDecorations(in: context, text: text, fullRange: fullRange, visible: visible)
     }
+    context.restoreGState()
     let fallback = NSColor.labelColor.cgColor
     let hasPaint = fullRange.length > 0
-    for line in textLayout.lines where line.frame.intersects(visible) {
-      context.saveGState()
-      context.translateBy(x: line.frame.minX, y: line.baseline)
-      context.scaleBy(x: 1, y: -1)
-      // The layout draws in the context's fill color; paint each stretch of glyphs in its
-      // text's color.
-      for run in CTLineGetGlyphRuns(line.ctLine) as? [CTRun] ?? [] {
-        let count = CTRunGetGlyphCount(run)
-        guard count > 0 else { continue }
-        var indices = [CFIndex](repeating: 0, count: count)
-        CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
-        var start = 0
-        var current = hasPaint ? color(at: indices[0], fallback: fallback) : fallback
-        for glyph in 1 ... count {
-          let next = glyph < count ? (hasPaint ? color(at: indices[glyph], fallback: fallback) : fallback) : nil
-          guard glyph == count || next != current else { continue }
-          context.setFillColor(current)
-          context.textPosition = .zero
-          CTRunDraw(run, context, CFRange(location: start, length: glyph - start))
-          start = glyph
-          if let next { current = next }
+    for (index, line) in textLayout.lines.enumerated() where line.frame.intersects(visible) {
+      if let reveal {
+        if index > reveal.frontier { continue }
+        if index == reveal.frontier {
+          drawFrontier(line, revealed: reveal.length, bleed: bleed, in: context, fallback: fallback, hasPaint: hasPaint)
+          continue
         }
       }
-      context.restoreGState()
+      drawLine(line, in: context, fallback: fallback, hasPaint: hasPaint)
     }
     context.restoreGState()
+  }
+
+  /// streaming: the revealed count and the line holding it, while part of the text is hidden.
+  private var reveal: (length: Int, frontier: Int)? {
+    guard let revealed = revealedLength, revealed < textLayout.length,
+          let frontier = textLayout.lines.firstIndex(where: { NSMaxRange($0.range) > max(0, revealed) })
+    else { return nil }
+    return (revealed, frontier)
+  }
+
+  /// Where highlights and decorations may draw while revealing: everything above the frontier line and the frontier's
+  /// solid part.
+  private func revealedRegion(_ reveal: (length: Int, frontier: Int), bleed: CGFloat) -> [CGRect] {
+    let line = textLayout.lines[reveal.frontier]
+    let far: CGFloat = 100_000
+    let above = CGRect(x: -far, y: -far, width: 2 * far, height: far + line.frame.minY)
+    return [above, frontierRects(line, revealed: reveal.length, bleed: bleed).solid]
+  }
+
+  /// The frontier line's fully drawn part and its fade ramp, in text coordinates (right-to-left lines reveal leftward).
+  private func frontierRects(_ line: TextLayout.Line, revealed: Int, bleed: CGFloat) -> (solid: CGRect, ramp: CGRect) {
+    let offset = CTLineGetOffsetForStringIndex(line.ctLine, revealed, nil)
+    let fade = Self.revealFadeWidth
+    let top = line.frame.minY - bleed
+    let height = line.frame.height + 2 * bleed
+    let isRightToLeft = line.direction == .rightToLeft
+    let edge = line.frame.minX + offset
+    let solid = isRightToLeft
+      ? CGRect(x: edge + fade, y: top, width: max(0, line.frame.maxX + bleed - edge - fade), height: height)
+      : CGRect(x: line.frame.minX - bleed, y: top, width: max(0, edge - fade - line.frame.minX + bleed), height: height)
+    let ramp = CGRect(x: isRightToLeft ? edge : edge - fade, y: top, width: fade, height: height)
+    return (solid, ramp)
+  }
+
+  private func drawFrontier(
+    _ line: TextLayout.Line, revealed: Int, bleed: CGFloat, in context: CGContext, fallback: CGColor, hasPaint: Bool
+  ) {
+    let rects = frontierRects(line, revealed: revealed, bleed: bleed)
+    if rects.solid.width > 0 {
+      context.saveGState()
+      context.clip(to: rects.solid)
+      drawLine(line, in: context, fallback: fallback, hasPaint: hasPaint)
+      context.restoreGState()
+    }
+    let mask = line.direction == .rightToLeft ? Self.risingMask : Self.fallingMask
+    if let mask {
+      context.saveGState()
+      context.clip(to: rects.ramp, mask: mask)
+      drawLine(line, in: context, fallback: fallback, hasPaint: hasPaint)
+      context.restoreGState()
+    }
+  }
+
+  /// One line's glyphs, each stretch in its text's color (the layout draws in the context's fill color).
+  private func drawLine(_ line: TextLayout.Line, in context: CGContext, fallback: CGColor, hasPaint: Bool) {
+    context.saveGState()
+    context.translateBy(x: line.frame.minX, y: line.baseline)
+    context.scaleBy(x: 1, y: -1)
+    for run in CTLineGetGlyphRuns(line.ctLine) as? [CTRun] ?? [] {
+      let count = CTRunGetGlyphCount(run)
+      guard count > 0 else { continue }
+      var indices = [CFIndex](repeating: 0, count: count)
+      CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
+      var start = 0
+      var current = hasPaint ? color(at: indices[0], fallback: fallback) : fallback
+      for glyph in 1 ... count {
+        let next = glyph < count ? (hasPaint ? color(at: indices[glyph], fallback: fallback) : fallback) : nil
+        guard glyph == count || next != current else { continue }
+        context.setFillColor(current)
+        context.textPosition = .zero
+        CTRunDraw(run, context, CFRange(location: start, length: glyph - start))
+        start = glyph
+        if let next { current = next }
+      }
+    }
+    context.restoreGState()
+  }
+
+  /// One-pixel-tall gray ramps for `clip(to:mask:)`: white shows, black hides.
+  private static let fallingMask = ramp(from: 255, to: 0)
+  private static let risingMask = ramp(from: 0, to: 255)
+
+  private static func ramp(from start: UInt8, to end: UInt8) -> CGImage? {
+    let width = 32
+    let pixels = (0 ..< width).map { index in
+      UInt8(Double(start) + (Double(end) - Double(start)) * Double(index) / Double(width - 1))
+    }
+    guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+    return CGImage(
+      width: width, height: 1, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: width,
+      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+      provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
+    )
   }
 
   private var backingScale: CGFloat { max(window?.backingScaleFactor ?? 2, 1) }
@@ -939,6 +1109,43 @@ final class CoreTextGlyphView: NSView {
       }
     }
     return gaps
+  }
+}
+
+/// `CoreTextGlyphView`'s drawing, done by Core Animation when the layer is marked for display.
+final class CoreTextGlyphLayer: CALayer {
+  weak var owner: CoreTextGlyphView?
+
+  override init() {
+    super.init()
+    isOpaque = false
+    needsDisplayOnBoundsChange = true
+  }
+
+  override init(layer: Any) {
+    super.init(layer: layer)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  // No implicit animations: a new frame or new contents show at once, with the row.
+  override func action(forKey _: String) -> (any CAAction)? { NSNull() }
+
+  override func draw(in ctx: CGContext) {
+    // Inside a flipped, layer-backed view the context comes flipped already (y down); otherwise flip it, so the
+    // owner draws in its own coordinates either way.
+    if !contentsAreFlipped() {
+      ctx.translateBy(x: 0, y: bounds.height)
+      ctx.scaleBy(x: 1, y: -1)
+    }
+    let dirty = ctx.boundingBoxOfClipPath
+    // Core Animation displays layers on the main thread, in its commit.
+    MainActor.assumeIsolated {
+      owner?.drawGlyphs(in: ctx, dirtyRect: dirty)
+    }
   }
 }
 

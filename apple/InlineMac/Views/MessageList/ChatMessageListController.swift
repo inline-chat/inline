@@ -10,7 +10,8 @@ protocol ChatMessageListController: NSViewController {
   var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)? { get set }
   var isMessageSelectionActive: Bool { get }
   var selectedMessagesInLoadedOrder: [FullMessage] { get }
-  var messageSelectionTableView: NSTableView { get }
+  /// Where the list's rows are, for selecting by dragging and the selection keys.
+  var messageSelectionRows: any MessageListRowGeometry { get }
   var messageSelectionInset: CGFloat? { get set }
   var messageColumnGuide: NSLayoutGuide { get }
   func setMaximumContentWidth(_ width: CGFloat?)
@@ -30,6 +31,8 @@ protocol ChatMessageListController: NSViewController {
   @discardableResult func selectAllMessages() -> Bool
   @discardableResult func clearMessageSelection() -> Bool
   func updateInsetForCompose(_ height: CGFloat, animate: Bool)
+  /// The composer's height on screen changed (each frame of its own height animation).
+  func composerHeightDidChange(_ height: CGFloat)
   /// A whole message as copy blocks, keeping rich structure when it is on screen.
   func clipboardBlocks(for message: FullMessage) -> [MessageClipboardDocument.Block]
   func collapseHistory(maxID: Int64?) async throws
@@ -41,6 +44,10 @@ extension ChatMessageListController {
   func updateInsetForCompose(_ height: CGFloat) {
     updateInsetForCompose(height, animate: true)
   }
+
+  /// The composer's height on screen changed (each frame of its own height animation). A list that follows it frame by
+  /// frame (the timeline list) overrides this.
+  func composerHeightDidChange(_ height: CGFloat) {}
 }
 
 extension MessageListAppKit: ChatMessageListController {}

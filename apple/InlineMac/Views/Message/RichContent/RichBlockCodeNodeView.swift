@@ -9,20 +9,26 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     return label
   }()
 
+  /// The copy button's two icons, made once: the button and its symbol lookup were most of a new code block's cost.
+  private static let copyIcon = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy code")?
+    .withSymbolConfiguration(.init(pointSize: RichBlockCodeMetrics.copyIconSize, weight: .regular))
+  private static let copiedIcon = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied")?
+    .withSymbolConfiguration(.init(pointSize: RichBlockCodeMetrics.copyIconSize, weight: .regular))
+
   private let copyButton: NSButton = {
-    let button = NSButton(title: "", target: nil, action: nil)
+    // Not `NSButton(title:target:action:)`: that one sizes itself to a title first; the frame comes from `layout`.
+    let button = NSButton(frame: .zero)
+    button.title = ""
     button.bezelStyle = .inline
     button.isBordered = false
     button.imagePosition = .imageOnly
     button.imageScaling = .scaleProportionallyDown
-    button.image = NSImage(
-      systemSymbolName: "doc.on.doc",
-      accessibilityDescription: "Copy code"
-    )?.withSymbolConfiguration(.init(pointSize: RichBlockCodeMetrics.copyIconSize, weight: .regular))
+    button.image = RichBlockCodeNodeView.copyIcon
     button.toolTip = "Copy code"
     button.setAccessibilityLabel("Copy code")
     return button
   }()
+  private var showsCopiedFeedback = false
 
   private let headerDivider: NSView = {
     let view = NSView(frame: .zero)
@@ -159,15 +165,15 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     languageLabel.stringValue = code.language.map(RichBlockCodeMetrics.displayLanguage) ?? ""
     languageLabel.isHidden = code.language == nil
     headerDivider.isHidden = code.language == nil
-    languageLabel.textColor = context.palette.primary.withAlphaComponent(RichBlockCodeMetrics.labelAlpha)
+    languageLabel.textColor = context.palette.primary.richBlockFaded(RichBlockCodeMetrics.labelAlpha)
     headerDivider.layer?.backgroundColor = context.palette.primary
-      .withAlphaComponent(RichBlockCodeMetrics.dividerAlpha).cgColor
-    copyButton.contentTintColor = context.palette.primary.withAlphaComponent(RichBlockCodeMetrics.copyIconAlpha)
+      .richBlockFaded(RichBlockCodeMetrics.dividerAlpha).cgColor
+    copyButton.contentTintColor = context.palette.primary.richBlockFaded(RichBlockCodeMetrics.copyIconAlpha)
     layer?.backgroundColor = context.palette.codeFill.cgColor
     gutter.apply(
       lineCount: code.lineCount,
       font: RichBlockCodeMetrics.gutterFont,
-      color: context.palette.primary.withAlphaComponent(RichBlockCodeMetrics.lineNumberAlpha)
+      color: context.palette.primary.richBlockFaded(RichBlockCodeMetrics.lineNumberAlpha)
     )
     let input = HighlightInput(
       baseText: text,
@@ -209,6 +215,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    surface.prepareForReuse()
     highlightGeneration &+= 1
     highlightTask?.cancel()
     highlightTask = nil
@@ -293,12 +300,10 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
   }
 
   private func setCopyFeedback(copied: Bool) {
-    let symbolName = copied ? "checkmark" : "doc.on.doc"
+    guard showsCopiedFeedback != copied else { return }
+    showsCopiedFeedback = copied
     let label = copied ? "Copied" : "Copy code"
-    copyButton.image = NSImage(
-      systemSymbolName: symbolName,
-      accessibilityDescription: label
-    )?.withSymbolConfiguration(.init(pointSize: RichBlockCodeMetrics.copyIconSize, weight: .regular))
+    copyButton.image = copied ? Self.copiedIcon : Self.copyIcon
     copyButton.toolTip = label
     copyButton.setAccessibilityLabel(label)
   }

@@ -324,7 +324,8 @@ class MessageViewAppKit: NSView {
       // The media's own tail leaves with its mask; a fading colored tail would flash behind it.
       animated: animated && mediaBleed == nil
     )
-    syncBubbleTailSideConstraint(side)
+    // The tail's side decides its frame (`layoutParts`).
+    needsLayout = true
   }
 
   /// Media reaching the bubble's bottom corners continues into the tail.
@@ -348,11 +349,6 @@ class MessageViewAppKit: NSView {
       hasTail: bubbleTailSide != .none,
       roundsTop: media.top < 0.5
     )
-  }
-
-  private func syncBubbleTailSideConstraint(_ side: MessageBubbleTailView.Side) {
-    bubbleTailLeadingConstraint?.isActive = side == .leading
-    bubbleTailTrailingConstraint?.isActive = side == .trailing
   }
 
   private var linkColor: NSColor {
@@ -414,7 +410,6 @@ class MessageViewAppKit: NSView {
 
   private lazy var bubbleView: MessageBubbleBackgroundView = {
     let view = MessageBubbleBackgroundView()
-    view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadius = Theme.messageBubbleCornerRadius
     view.backgroundColor = bubbleBackgroundColor
     let alphas = bubbleGradientOverlayAlphas
@@ -424,7 +419,6 @@ class MessageViewAppKit: NSView {
 
   private lazy var bubbleTailView: MessageBubbleTailView = {
     let view = MessageBubbleTailView()
-    view.translatesAutoresizingMaskIntoConstraints = false
     let alphas = bubbleGradientOverlayAlphas
     view.configureContinuousGradient(topAlpha: alphas.top, bottomAlpha: alphas.bottom)
     return view
@@ -445,15 +439,21 @@ class MessageViewAppKit: NSView {
 
   private var shineEffectView: ShineEffectView?
 
+  /// Set once `avatarView` is built (only rows that show an inline avatar build it).
+  private var avatarViewIfLoaded: UserAvatarView?
+
   private lazy var avatarView: UserAvatarView = {
     let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted, viaMark: fullMessage.viaPresentation?.mark)
-    view.translatesAutoresizingMaskIntoConstraints = false
+    avatarViewIfLoaded = view
     return view
   }()
 
+  /// Set once `nameLabel` is built (only rows that show a name build it).
+  private var nameLabelIfLoaded: NSTextField?
+
   private lazy var nameLabel: NSTextField = {
     let label = MessageSenderNameLabel()
-    label.translatesAutoresizingMaskIntoConstraints = false
+    nameLabelIfLoaded = label
     label.font = senderFont
     label.lineBreakMode = .byTruncatingTail
     let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleNameClick))
@@ -468,13 +468,11 @@ class MessageViewAppKit: NSView {
 
   private lazy var forwardHeaderLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .preferredFont(forTextStyle: .callout)
     label.textColor = forwardHeaderTextColor
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
     label.cell?.usesSingleLineMode = true
-    label.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight).isActive = true
     let clickGesture = NSClickGestureRecognizer(
       target: self,
       action: #selector(handleForwardHeaderClick)
@@ -484,11 +482,7 @@ class MessageViewAppKit: NSView {
     return label
   }()
 
-  private lazy var contentView: NSView = {
-    let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
+  private lazy var contentView: NSView = NSView()
 
   /// "Sent via …" rides the time on the last message of an agent's run.
   private var timeViaPresentation: MessageViaPresentation? {
@@ -502,7 +496,6 @@ class MessageViewAppKit: NSView {
       usesOutgoingBubbleStyle: usesOutgoingBubbleStyle,
       via: timeViaPresentation
     )
-    view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     return view
   }()
@@ -512,13 +505,14 @@ class MessageViewAppKit: NSView {
 
   private lazy var photoView: NewPhotoView = {
     let view = NewPhotoView(fullMessage, scrollState: scrollState)
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`layoutParts`); the view opts itself into constraints.
+    view.translatesAutoresizingMaskIntoConstraints = true
     photoViewIfLoaded = view
     return view
   }()
 
-  /// An album's grid, in its photo's place (`props.album`). The photo view keeps the slot's
-  /// constraints and stays hidden under it.
+  /// An album's grid, in its photo's place (`props.album`). The photo view keeps the slot and
+  /// stays hidden under it; `layoutParts` gives the grid the slot's frame.
   private var albumGridView: MessageAlbumGridView?
 
   private func syncAlbumGrid() {
@@ -531,15 +525,10 @@ class MessageViewAppKit: NSView {
     photoView.isHidden = true
     let grid = albumGridView ?? {
       let grid = MessageAlbumGridView()
-      grid.translatesAutoresizingMaskIntoConstraints = false
+      grid.frame = photoView.frame
       contentView.addSubview(grid, positioned: .above, relativeTo: photoView)
-      NSLayoutConstraint.activate([
-        grid.topAnchor.constraint(equalTo: photoView.topAnchor),
-        grid.leadingAnchor.constraint(equalTo: photoView.leadingAnchor),
-        grid.widthAnchor.constraint(equalTo: photoView.widthAnchor),
-        grid.heightAnchor.constraint(equalTo: photoView.heightAnchor),
-      ])
       albumGridView = grid
+      needsLayout = true
       return grid
     }()
     let message = fullMessage.message
@@ -563,17 +552,18 @@ class MessageViewAppKit: NSView {
     return albumFilesView.row(at: point)
   }
 
+  /// Set once `videoView` is built. Reads that must not build the video view use this.
+  private var videoViewIfLoaded: NewVideoView?
+
   private lazy var videoView: NewVideoView = {
     let view = NewVideoView(fullMessage, scrollState: scrollState)
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`layoutParts`); the view opts itself into constraints.
+    view.translatesAutoresizingMaskIntoConstraints = true
+    videoViewIfLoaded = view
     return view
   }()
 
-  private lazy var documentContainerView: NSView = {
-    let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
+  private lazy var documentContainerView: NSView = NSView()
 
   private lazy var documentView: DocumentView? = {
     guard let documentInfo = fullMessage.documentInfo else { return nil }
@@ -583,7 +573,6 @@ class MessageViewAppKit: NSView {
       fullMessage: self.fullMessage,
       white: usesOutgoingBubbleStyle
     )
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -596,7 +585,6 @@ class MessageViewAppKit: NSView {
       maxWidth: props.layout.document?.size.width ?? Theme.voiceMessageViewWidth,
       mode: .embeddedBubble
     ))
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -657,7 +645,8 @@ class MessageViewAppKit: NSView {
       usesOutgoingBubbleStyle: usesOutgoingBubbleStyle,
       itemPlans: props.layout.attachmentItems
     )
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`layoutParts`); the stack opts itself into constraints.
+    view.translatesAutoresizingMaskIntoConstraints = true
     return view
   }
 
@@ -677,7 +666,6 @@ class MessageViewAppKit: NSView {
     guard props.layout.hasActionsRows, !renderableMessageActionRows.isEmpty else {
       messageActionRowsView?.removeFromSuperview()
       messageActionRowsView = nil
-      clearMessageActionRowsConstraints()
       // Buttons drawn inside blocks still need loading, answers (toasts, alerts) and grants.
       if props.layout.richBlockContent?.claimedActionIDs.isEmpty == false {
         ensureMessageActionStateObservation()
@@ -696,7 +684,10 @@ class MessageViewAppKit: NSView {
 
     let view = messageActionRowsView ?? MessageActionRowsView()
     if view.superview == nil {
+      // Placed by frame (`layoutParts`); the view opts itself into constraints.
+      view.translatesAutoresizingMaskIntoConstraints = true
       addSubview(view)
+      needsLayout = true
     }
 
     view.onActionTap = { [weak self] action in
@@ -839,14 +830,6 @@ class MessageViewAppKit: NSView {
       if let forwardHeaderLabelIfLoaded, forwardHeaderLabelIfLoaded.superview != nil {
         forwardHeaderLabelIfLoaded.removeFromSuperview()
       }
-      NSLayoutConstraint.deactivate([
-        forwardHeaderTopConstraint,
-        forwardHeaderLeadingConstraint,
-        forwardHeaderTrailingConstraint,
-      ].compactMap { $0 })
-      forwardHeaderTopConstraint = nil
-      forwardHeaderLeadingConstraint = nil
-      forwardHeaderTrailingConstraint = nil
       return
     }
 
@@ -855,6 +838,7 @@ class MessageViewAppKit: NSView {
 
     if forwardHeaderLabel.superview == nil {
       contentView.addSubview(forwardHeaderLabel)
+      needsLayout = true
     }
   }
 
@@ -876,7 +860,6 @@ class MessageViewAppKit: NSView {
     } else if let album = props.album, album.hasFiles {
       let files = albumFilesView ?? {
         let view = MessageAlbumFilesView()
-        view.translatesAutoresizingMaskIntoConstraints = false
         albumFilesView = view
         return view
       }()
@@ -897,13 +880,11 @@ class MessageViewAppKit: NSView {
 
     if desiredView.superview !== documentContainerView {
       desiredView.removeFromSuperview()
+      // Fills the slot, whose frame `layoutParts` sets.
+      desiredView.translatesAutoresizingMaskIntoConstraints = true
+      desiredView.autoresizingMask = [.width, .height]
+      desiredView.frame = documentContainerView.bounds
       documentContainerView.addSubview(desiredView)
-      NSLayoutConstraint.activate([
-        desiredView.topAnchor.constraint(equalTo: documentContainerView.topAnchor),
-        desiredView.leadingAnchor.constraint(equalTo: documentContainerView.leadingAnchor),
-        desiredView.trailingAnchor.constraint(equalTo: documentContainerView.trailingAnchor),
-        desiredView.bottomAnchor.constraint(equalTo: documentContainerView.bottomAnchor),
-      ])
     }
   }
 
@@ -928,9 +909,13 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  /// Set once `replyView` is built. Reads that must not build the reply preview use this.
+  private var replyViewIfLoaded: EmbeddedMessageView?
+
   private lazy var replyView: EmbeddedMessageView = {
     let view = EmbeddedMessageView(style: embeddedReplyStyle)
-    view.translatesAutoresizingMaskIntoConstraints = false
+    replyViewIfLoaded = view
+    view.usesFrameLayout()
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
       view.update(with: embeddedMessage, kind: .replyInMessage)
@@ -944,7 +929,8 @@ class MessageViewAppKit: NSView {
 
   private lazy var replyThreadSummaryView: ReplyThreadSummaryView = {
     let view = ReplyThreadSummaryView(style: embeddedReplyStyle)
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`layoutParts`); the view opts itself into constraints.
+    view.translatesAutoresizingMaskIntoConstraints = true
     view.isHidden = true
     view.onTap = { [weak self] flags in
       if let self {
@@ -999,36 +985,8 @@ class MessageViewAppKit: NSView {
     let view = replyThreadSummaryView
     guard view.superview == nil else { return view }
     contentView.addSubview(view)
-    if !isInitialUpdateConstraint, replyThreadSummaryViewTopConstraint == nil {
-      NSLayoutConstraint.activate(makeReplyThreadSummaryConstraints(for: view))
-    }
+    needsLayout = true
     return view
-  }
-
-  private func makeReplyThreadSummaryConstraints(for view: ReplyThreadSummaryView) -> [NSLayoutConstraint] {
-    let layout = props.layout
-    let replyThreadSummaryLayout = layout.replyThreadSummary
-    let showsReplyThreadSummary = shouldShowReplyThreadSummary(for: props)
-    let top = view.topAnchor.constraint(
-      equalTo: contentView.topAnchor,
-      constant: layout.replyThreadSummaryContentViewTop
-    )
-    let leading = view.leadingAnchor.constraint(
-      equalTo: contentView.leadingAnchor,
-      constant: replyThreadSummaryLayout?.spacing.left ?? 0
-    )
-    let trailing = view.trailingAnchor.constraint(
-      equalTo: contentView.trailingAnchor,
-      constant: -(replyThreadSummaryLayout?.spacing.right ?? 0)
-    )
-    let height = view.heightAnchor.constraint(
-      equalToConstant: showsReplyThreadSummary ? (replyThreadSummaryLayout?.size.height ?? 0) : 0
-    )
-    replyThreadSummaryViewTopConstraint = top
-    replyThreadSummaryViewLeadingConstraint = leading
-    replyThreadSummaryViewTrailingConstraint = trailing
-    replyThreadSummaryViewHeightConstraint = height
-    return [top, leading, trailing, height]
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
@@ -1080,7 +1038,6 @@ class MessageViewAppKit: NSView {
   private func loadCoreTextView() -> CoreTextMessageView {
     if let coreTextView { return coreTextView }
     let view = CoreTextMessageView(frame: .zero)
-    view.translatesAutoresizingMaskIntoConstraints = false
     coreTextView = view
     return view
   }
@@ -1100,16 +1057,14 @@ class MessageViewAppKit: NSView {
       textSurface?.onTextLongPress = nil
       host.removeFromSuperview()
     }
-    clearTextViewConstraints()
     usesCoreText = coreText
-    needsUpdateConstraints = true
+    needsLayout = true
     setupBoundsChangeObserver()
   }
 
   private lazy var nativeTextView: NSTextView = {
     if useTextKit2 {
       let textView = MessageTextView(usingTextLayoutManager: true)
-      textView.translatesAutoresizingMaskIntoConstraints = false
       textView.isEditable = false
       textView.isSelectable = true
       textView.backgroundColor = .clear
@@ -1206,7 +1161,6 @@ class MessageViewAppKit: NSView {
       textView.drawsBackground = false
       textView.isVerticallyResizable = false
       textView.isHorizontallyResizable = false
-      textView.translatesAutoresizingMaskIntoConstraints = false
       return textView
     }
   }()
@@ -1344,6 +1298,7 @@ class MessageViewAppKit: NSView {
 
   override func layout() {
     super.layout()
+    layoutParts()
     syncContinuousBubbleGradient()
     layoutAcknowledgement()
     layoutUploadProgressView()
@@ -1482,25 +1437,8 @@ class MessageViewAppKit: NSView {
     addSubview(bubbleView)
     syncBubbleTail()
 
-    if showsInlineAvatar {
-      addSubview(avatarView)
-    }
-
-    if showsName {
-      addSubview(nameLabel)
-      let sender = outgoing ? (dependencies?.rootData?.currentUserInfo?.user ?? from) : from
-      let name = sender.shortDisplayName
-      let nameForInitials = UserAvatar.getNameForInitials(user: sender)
-      // Previous outgoing label behavior, kept as reference for quick revert.
-      // nameLabel.stringValue = outgoing ? "You" : name
-      nameLabel.stringValue = name
-      nameLabel.textColor = NSColor(
-        InitialsCircle.ColorPalette
-          .color(for: nameForInitials)
-      )
-    }
-
     addSubview(contentView)
+    syncSenderViews()
 
     syncForwardHeaderView(for: props)
 
@@ -1524,6 +1462,10 @@ class MessageViewAppKit: NSView {
       contentView.addSubview(documentContainerView)
       syncDocumentSlotView()
     }
+
+    // An album's grid sits over the photo slot: built with the view (it was built only by the first constraint pass,
+    // gone with frame layout, so a new album row showed an empty slot until reconfigured by size).
+    syncAlbumGrid()
 
     syncTextViewForCurrentProps()
 
@@ -1550,6 +1492,7 @@ class MessageViewAppKit: NSView {
 
     // Setup translation state observation
     setupTranslationStateObservation()
+    layoutContentParts()
   }
 
   private func setupTranslationStateObservation() {
@@ -1598,7 +1541,8 @@ class MessageViewAppKit: NSView {
     }
     if hasText {
       if textView.superview == nil {
-        contentView.addSubview(textView)
+        addTextHostToContent(textView)
+        needsLayout = true
         MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=attachTextView")
       }
       if let messageTextView = textView as? MessageTextView {
@@ -1616,8 +1560,16 @@ class MessageViewAppKit: NSView {
     (textView as? MessageTextView)?.onEntityClick = nil
     (textView as? MessageTextView)?.onTextLongPress = nil
     textView.removeFromSuperview()
-    clearTextViewConstraints()
     detectedLinks = []
+  }
+
+  /// Text joins the content view below the reaction chips (a reused view can gain text after its reactions).
+  private func addTextHostToContent(_ view: NSView) {
+    if let reactionsView, reactionsView.superview === contentView {
+      contentView.addSubview(view, positioned: .below, relativeTo: reactionsView)
+    } else {
+      contentView.addSubview(view)
+    }
   }
 
   private func syncCoreTextViewForCurrentProps() {
@@ -1627,12 +1579,12 @@ class MessageViewAppKit: NSView {
       view.onEntityClick = nil
       view.onTextLongPress = nil
       view.removeFromSuperview()
-      clearTextViewConstraints()
       detectedLinks = []
       return
     }
     if view.superview == nil {
-      contentView.addSubview(view)
+      addTextHostToContent(view)
+      needsLayout = true
     }
     if view.onEntityClick == nil {
       setupEntityClickHandling()
@@ -1647,19 +1599,6 @@ class MessageViewAppKit: NSView {
         )
       }
     }
-  }
-
-  private func clearTextViewConstraints() {
-    NSLayoutConstraint.deactivate([
-      textViewWidthConstraint,
-      textViewHeightConstraint,
-      textViewTopConstraint,
-      textViewLeadingConstraint,
-    ].compactMap(\.self))
-    textViewWidthConstraint = nil
-    textViewHeightConstraint = nil
-    textViewTopConstraint = nil
-    textViewLeadingConstraint = nil
   }
 
   @discardableResult
@@ -1888,7 +1827,7 @@ class MessageViewAppKit: NSView {
     if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden,
        let hit = richBlockContentView.interactiveTextHitTest(
          richBlockContentView.convert(locationInSelf, from: self)
-       ) as? MessageTextView {
+       ) as? (any MessageTextSurface) {
       return hit.entityHit(at: hit.convert(locationInSelf, from: self), extraTextRanges: []) != nil
     }
     guard let textView = attachedTextHost, !textView.isHidden else { return false }
@@ -1967,15 +1906,8 @@ class MessageViewAppKit: NSView {
     if isTranslating {
       if shineEffectView == nil {
         let shineView = ShineEffectView(frame: bubbleView.bounds)
-        shineView.translatesAutoresizingMaskIntoConstraints = false
+        shineView.autoresizingMask = [.width, .height]
         bubbleView.addSubview(shineView)
-
-        NSLayoutConstraint.activate([
-          shineView.topAnchor.constraint(equalTo: bubbleView.topAnchor),
-          shineView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
-          shineView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
-          shineView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor),
-        ])
 
         shineEffectView = shineView
         shineView.startAnimation()
@@ -1989,28 +1921,10 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Reactions UI
 
-  private func clearReactionsConstraints() {
-    let constraintsToDeactivate = [
-      reactionViewWidthConstraint,
-      reactionViewHeightConstraint,
-      reactionViewTopConstraint,
-      reactionViewLeadingConstraint,
-      reactionViewTrailingConstraint,
-    ].compactMap(\.self)
-    NSLayoutConstraint.deactivate(constraintsToDeactivate)
-
-    reactionViewWidthConstraint = nil
-    reactionViewHeightConstraint = nil
-    reactionViewTopConstraint = nil
-    reactionViewLeadingConstraint = nil
-    reactionViewTrailingConstraint = nil
-  }
-
   private func setupReactions(animate: Bool) {
     if let oldView = reactionsView {
       oldView.removeFromSuperview()
     }
-    clearReactionsConstraints()
 
     // View
     let view = MessageReactionsView()
@@ -2022,7 +1936,6 @@ class MessageViewAppKit: NSView {
       transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
       animate: animate
     )
-    view.translatesAutoresizingMaskIntoConstraints = false
     reactionsView = view
 
     // debug
@@ -2048,57 +1961,7 @@ class MessageViewAppKit: NSView {
         contentView.addSubview(reactionsView!)
       }
     }
-
-    // Reactions
-    if let reactionsPlan = props.layout.reactions, let reactionsView {
-      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
-        equalToConstant: reactionsPlan.size.height
-      )
-      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
-        equalToConstant: reactionsPlan.size.width
-      )
-      if reactionsOutsideBubble {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
-          constant: props.layout.reactionsOutsideBubbleTopInset
-        )
-        if hasAcknowledgement {
-          reactionViewLeadingConstraint = reactionsView.leftAnchor.constraint(
-            equalTo: bubbleView.leftAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        } else if outgoing {
-          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
-            equalTo: bubbleView.trailingAnchor,
-            constant: -reactionsPlan.spacing.right
-          )
-        } else {
-          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-            equalTo: bubbleView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        }
-      } else {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: props.layout.reactionsViewTop
-        )
-        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: reactionsPlan.spacing.left
-        )
-      }
-
-      NSLayoutConstraint.activate(
-        [
-          reactionViewHeightConstraint,
-          reactionViewWidthConstraint,
-          reactionViewTopConstraint,
-          reactionViewLeadingConstraint,
-          reactionViewTrailingConstraint,
-        ].compactMap(\.self)
-      )
-    }
+    needsLayout = true
   }
 
   private func updateReactionsSizes() {
@@ -2112,105 +1975,37 @@ class MessageViewAppKit: NSView {
     )
   }
 
-  private func applyAttachmentsLayout(_ attachments: MessageSizeCalculator.LayoutPlan) {
-    guard let attachmentsView else { return }
-
-    attachmentsView.apply(itemPlans: props.layout.attachmentItems)
-
-    if attachmentsViewTopConstraint == nil ||
-      attachmentsViewLeadingConstraint == nil ||
-      attachmentsViewWidthConstraint == nil ||
-      attachmentsViewHeightConstraint == nil
-    {
-      clearAttachmentsViewConstraints()
-
-      attachmentsViewTopConstraint = attachmentsView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: props.layout.attachmentsContentViewTop
-      )
-      attachmentsViewLeadingConstraint = attachmentsView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor,
-        constant: attachments.spacing.left
-      )
-      attachmentsViewWidthConstraint = attachmentsView.widthAnchor.constraint(equalToConstant: attachments.size.width)
-      attachmentsViewHeightConstraint = attachmentsView.heightAnchor.constraint(equalToConstant: attachments.size.height)
-
-      NSLayoutConstraint.activate([
-        attachmentsViewTopConstraint,
-        attachmentsViewLeadingConstraint,
-        attachmentsViewWidthConstraint,
-        attachmentsViewHeightConstraint,
-      ].compactMap(\.self))
+  private func updateReactions(prev: FullMessage, next: FullMessage, props: MessageViewProps) {
+    // A reused row showing another message takes its reactions as they are; only the same message animates.
+    let animates = prev.id == next.id
+    if let reactionsView, next.reactions.count == 0 {
+      if animates {
+        log.trace("Removing reactions view")
+        reactionsView.removeFromSuperview()
+        self.reactionsView = nil
+      } else {
+        // Another message without reactions: the view stays, hidden, for the next message with reactions, whose
+        // emojis take its chips.
+        reactionsView.isHidden = true
+      }
       return
     }
-
-    if attachmentsViewTopConstraint?.constant != props.layout.attachmentsContentViewTop {
-      attachmentsViewTopConstraint?.constant = props.layout.attachmentsContentViewTop
-    }
-    if attachmentsViewLeadingConstraint?.constant != attachments.spacing.left {
-      attachmentsViewLeadingConstraint?.constant = attachments.spacing.left
-    }
-    if attachmentsViewWidthConstraint?.constant != attachments.size.width {
-      attachmentsViewWidthConstraint?.constant = attachments.size.width
-    }
-    if attachmentsViewHeightConstraint?.constant != attachments.size.height {
-      attachmentsViewHeightConstraint?.constant = attachments.size.height
-    }
-  }
-
-  private func clearAttachmentsViewConstraints() {
-    NSLayoutConstraint.deactivate([
-      attachmentsViewTopConstraint,
-      attachmentsViewLeadingConstraint,
-      attachmentsViewWidthConstraint,
-      attachmentsViewHeightConstraint,
-    ].compactMap(\.self))
-
-    attachmentsViewTopConstraint = nil
-    attachmentsViewLeadingConstraint = nil
-    attachmentsViewWidthConstraint = nil
-    attachmentsViewHeightConstraint = nil
-  }
-
-  private func clearMessageActionRowsConstraints() {
-    NSLayoutConstraint.deactivate([
-      messageActionRowsWidthConstraint,
-      messageActionRowsHeightConstraint,
-      messageActionRowsTopConstraint,
-      messageActionRowsSideConstraint,
-    ].compactMap(\.self))
-
-    messageActionRowsWidthConstraint = nil
-    messageActionRowsHeightConstraint = nil
-    messageActionRowsTopConstraint = nil
-    messageActionRowsSideConstraint = nil
-  }
-
-  private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
-    if reactionsView != nil, next.reactions.count == 0 {
-      log.trace("Removing reactions view")
-      // Remove
-      reactionsView?.removeFromSuperview()
-      reactionsView = nil
-      clearReactionsConstraints()
-      return
-    }
+    reactionsView?.isHidden = false
 
     let shouldPlaceOutside = props.layout.reactionsOutsideBubble
     if let reactionsView, shouldPlaceOutside != (reactionsView.superview === self) {
       log.trace("Rebuilding reactions view for placement change")
       setupReactions(animate: false)
-      needsUpdateConstraints = true
-      layoutSubtreeIfNeeded()
+      // Another message's reactions are placed by the layout pass before display; no forced pass.
+      if animates { layoutSubtreeIfNeeded() }
       return
     }
 
     if reactionsView == nil, next.reactions.count > 0 {
       log.trace("Adding reactions view \(props.layout.reactions)")
       // Added
-      setupReactions(animate: true)
-      needsUpdateConstraints = true
-      layoutSubtreeIfNeeded()
+      setupReactions(animate: animates)
+      if animates { layoutSubtreeIfNeeded() }
     } else {
       log.trace("Updating reactions view")
       reactionsView?.update(
@@ -2219,7 +2014,7 @@ class MessageViewAppKit: NSView {
         layoutItems: props.layout.reactionItems,
         forceIncomingStyle: reactionsOutsideBubble,
         transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
-        animate: true
+        animate: animates
       )
     }
   }
@@ -2248,13 +2043,65 @@ class MessageViewAppKit: NSView {
     }
     MessageGestureTrace.debug("MessageView.setupGestureRecognizers messageId=\(message.messageId) added=doubleClick")
 
+  }
+
+  /// The inline avatar and the sender name follow the plan and the sender: a reused view adds, fills or removes them
+  /// (both sit below the content view, as setup used to add them).
+  private func syncSenderViews() {
     if showsInlineAvatar {
-      avatarView.onClick = { [weak self] in
-        if let self {
-          MessageGestureTrace.debug("MessageView.avatarClick messageId=\(self.message.messageId)")
+      if avatarViewIfLoaded == nil {
+        avatarView.onClick = { [weak self] in
+          if let self {
+            MessageGestureTrace.debug("MessageView.avatarClick messageId=\(self.message.messageId)")
+          }
+          self?.handleAvatarClick()
         }
-        self?.handleAvatarClick()
+      } else {
+        avatarView.update(userInfo: fullMessage.senderInfo ?? .deleted, viaMark: fullMessage.viaPresentation?.mark)
       }
+      if avatarView.superview !== self {
+        addSubview(avatarView, positioned: .below, relativeTo: contentView)
+        needsLayout = true
+      }
+    } else if let avatarViewIfLoaded, avatarViewIfLoaded.superview != nil {
+      avatarViewIfLoaded.removeFromSuperview()
+    }
+
+    guard showsName else {
+      if let nameLabelIfLoaded, nameLabelIfLoaded.superview != nil { nameLabelIfLoaded.removeFromSuperview() }
+      return
+    }
+    let sender = outgoing ? (dependencies?.rootData?.currentUserInfo?.user ?? from) : from
+    let name = sender.shortDisplayName
+    // Previous outgoing label behavior, kept as reference for quick revert.
+    // nameLabel.stringValue = outgoing ? "You" : name
+    if nameLabel.stringValue != name || nameLabel.superview == nil {
+      nameLabel.stringValue = name
+      nameLabel.textColor = NSColor(
+        InitialsCircle.ColorPalette
+          .color(for: UserAvatar.getNameForInitials(user: sender))
+      )
+    }
+    if nameLabel.superview !== self {
+      addSubview(nameLabel, positioned: .below, relativeTo: contentView)
+      needsLayout = true
+    }
+  }
+
+  /// The reply preview follows the plan: a reused view adds, refills or removes it.
+  private func syncReplyView(for props: MessageViewProps) {
+    guard props.layout.hasReply else {
+      if let replyViewIfLoaded, replyViewIfLoaded.superview != nil { replyViewIfLoaded.removeFromSuperview() }
+      return
+    }
+    replyView.setRelatedMessage(fullMessage.message)
+    replyView.setStyle(embeddedReplyStyle(for: props))
+    if let embeddedMessage = fullMessage.repliedToMessage {
+      replyView.update(with: embeddedMessage, kind: .replyInMessage)
+    }
+    if replyView.superview !== contentView {
+      contentView.addSubview(replyView, positioned: .below, relativeTo: nil)
+      needsLayout = true
     }
   }
 
@@ -2537,882 +2384,344 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  private func setupConstraints() {
-    var constraints: [NSLayoutConstraint] = []
+  // MARK: - Frame layout
+
+  /// Places every part from the size calculator's plan, with frames: a row runs no constraints.
+  ///
+  /// The plan gives each part a size and outer spacings, and the tops of the parts inside the bubble
+  /// measured down from the bubble's top (`*ContentViewTop`). These views aren't flipped, so a part
+  /// `top` points below its container's top sits at `y = containerHeight - top - height`. Sides are
+  /// laid out leading to trailing and mirrored in a right-to-left layout, as leading and trailing
+  /// anchors were; the two parts that sat on absolute left and right edges keep them.
+  private func layoutParts() {
     let layout = props.layout
+    let size = bounds.size
+    syncStreamingState()
+    layoutContentParts()
+    // A row is configured before its host gives it a size; the parts placed against its edges wait for one.
+    guard size.width > 0, size.height > 0 else { return }
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
 
-    defer {
-      NSLayoutConstraint.activate(constraints)
-      syncAlbumGrid()
+    // Bubble and content view share a frame.
+    let bubbleSize = layout.bubble.size
+    let bubbleTop = layout.wrapper.spacing.top + (layout.hasName ? (layout.name?.size.height ?? 0) : 0)
+    let bubbleX = outgoing
+      ? size.width - Theme.messageSidePadding - bubbleSize.width
+      : (chatHasAvatar ? layout.nameAndBubbleLeading : Theme.messageSidePadding)
+    let bubbleBottom = bubbleTop + bubbleSize.height
+    place(bubbleView, x: bubbleX, top: bubbleTop, size: bubbleSize, in: size, mirrored: mirrored)
+    place(contentView, x: bubbleX, top: bubbleTop, size: bubbleSize, in: size, mirrored: mirrored)
+
+    bubbleTailView.bubbleSize = bubbleSize
+    let tailSize = MessageBubbleTailView.size
+    let tailX: CGFloat = switch bubbleTailSide {
+    case .leading: bubbleX + MessageBubbleTailView.bubbleOverlap - tailSize.width
+    case .trailing: bubbleX + bubbleSize.width - MessageBubbleTailView.bubbleOverlap
+    case .none: bubbleX
     }
+    place(
+      bubbleTailView,
+      x: tailX,
+      top: bubbleBottom + MessageBubbleTailView.bottomOverhang - tailSize.height,
+      size: tailSize,
+      in: size,
+      mirrored: mirrored
+    )
 
-    // Note:
-    // There shouldn't be any calculations of sizes or spacing here. All of it must be off-loaded to SizeCalculator
-    // and stored in the layout plan.
-
-    // Content View Top and Bottom Insets
-//    contentView.edgeInsets = NSEdgeInsets(
-//      top: layout.topMostContentTopSpacing,
-//      left: 0,
-//      bottom: layout.bottomMostContentBottomSpacing,
-//      right: 0
-//    )
-
-    if let avatar = layout.avatar, showsInlineAvatar {
-      constraints.append(
-        contentsOf: [
-          avatarView.leadingAnchor
-            .constraint(equalTo: leadingAnchor, constant: avatar.spacing.left),
-          avatarView.topAnchor
-            .constraint(
-              equalTo: topAnchor,
-              constant: avatar.spacing.top + layout.wrapper.spacing.top
-            ),
-          avatarView.widthAnchor.constraint(equalToConstant: avatar.size.width),
-          avatarView.heightAnchor.constraint(equalToConstant: avatar.size.height),
-        ]
+    if showsInlineAvatar, let avatar = layout.avatar, avatarView.superview === self {
+      place(
+        avatarView,
+        x: avatar.spacing.left,
+        top: avatar.spacing.top + layout.wrapper.spacing.top,
+        size: avatar.size,
+        in: size,
+        mirrored: mirrored
       )
     }
 
-    if let name = layout.name, showsName {
-      constraints.append(
-        contentsOf: [
-          nameLabel.leadingAnchor
-            .constraint(
-              equalTo: leadingAnchor,
-              constant: layout.nameAndBubbleLeading + name.spacing.left
-            ),
-          nameLabel.topAnchor
-            .constraint(equalTo: topAnchor, constant: layout.wrapper.spacing.top),
-          nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-          nameLabel.heightAnchor
-            .constraint(equalToConstant: name.size.height),
-        ]
+    if showsName, let name = layout.name, nameLabel.superview === self {
+      let x = layout.nameAndBubbleLeading + name.spacing.left
+      let width = min(nameLabelWidth, max(0, size.width - x))
+      place(
+        nameLabel,
+        x: x,
+        top: layout.wrapper.spacing.top,
+        size: CGSize(width: width, height: name.size.height),
+        in: size,
+        mirrored: mirrored
       )
     }
 
-    // Bubble And Content View
-
-    if layout.hasName {
-      // if we have name, attach bubble to it
-      constraints.append(contentsOf: [
-        bubbleView.topAnchor.constraint(
-          equalTo: nameLabel.bottomAnchor
-        ),
-        contentView.topAnchor.constraint(
-          equalTo: nameLabel.bottomAnchor
-        ),
-      ])
-
-    } else {
-      // otherwise attach to top
-      constraints.append(contentsOf: [
-        bubbleView.topAnchor.constraint(
-          equalTo: topAnchor,
-          constant: layout.wrapper.spacing.top
-        ),
-        contentView.topAnchor.constraint(
-          equalTo: topAnchor,
-          constant: layout.wrapper.spacing.top
-        ),
-      ])
-    }
-
-    bubbleViewHeightConstraint = bubbleView.heightAnchor.constraint(equalToConstant: layout.bubble.size.height)
-    bubbleTailView.bubbleSize = layout.bubble.size
-    bubbleViewWidthConstraint = bubbleView.widthAnchor.constraint(
-      equalToConstant: layout.bubble.size.width
-    )
-    contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: layout.bubble.size.width)
-    contentViewHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: layout.bubble.size.height)
-
-    let sidePadding = Theme.messageSidePadding
-    let contentLeading = chatHasAvatar ? layout.nameAndBubbleLeading : sidePadding
-
-    // Depending on outgoing or incoming message
-    let contentViewSideAnchor =
-      !outgoing ?
-      contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
-      contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
-    let bubbleViewSideAnchor =
-      !outgoing ?
-      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
-      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
-    bubbleTailLeadingConstraint = bubbleTailView.trailingAnchor.constraint(
-      equalTo: bubbleView.leadingAnchor,
-      constant: MessageBubbleTailView.bubbleOverlap
-    )
-    bubbleTailTrailingConstraint = bubbleTailView.leadingAnchor.constraint(
-      equalTo: bubbleView.trailingAnchor,
-      constant: -MessageBubbleTailView.bubbleOverlap
-    )
-    syncBubbleTailSideConstraint(bubbleTailSide)
-
-    constraints.append(
-      contentsOf: [
-        bubbleViewHeightConstraint,
-        bubbleViewWidthConstraint,
-        bubbleViewSideAnchor,
-        bubbleTailView.widthAnchor.constraint(equalToConstant: MessageBubbleTailView.size.width),
-        bubbleTailView.heightAnchor.constraint(equalToConstant: MessageBubbleTailView.size.height),
-        bubbleTailView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: MessageBubbleTailView.bottomOverhang),
-
-        contentViewHeightConstraint,
-        contentViewWidthConstraint,
-        contentViewSideAnchor,
-      ]
-    )
-
+    // Under the bubble: action rows, then reactions placed outside it.
+    var belowBubble = bubbleBottom
     if let actionsRows = layout.actionsRows, let messageActionRowsView {
-      messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(equalToConstant: actionsRows.size.width)
-      messageActionRowsHeightConstraint = messageActionRowsView.heightAnchor.constraint(equalToConstant: actionsRows.size.height)
-      messageActionRowsTopConstraint = messageActionRowsView.topAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor,
-        constant: actionsRows.spacing.top
+      let top = bubbleBottom + actionsRows.spacing.top
+      place(
+        messageActionRowsView,
+        x: outgoing ? bubbleX + bubbleSize.width - actionsRows.size.width : bubbleX,
+        top: top,
+        size: actionsRows.size,
+        in: size,
+        mirrored: mirrored
       )
+      belowBubble = top + actionsRows.size.height
+    }
 
-      if outgoing {
-        messageActionRowsSideConstraint = messageActionRowsView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor)
-      } else {
-        messageActionRowsSideConstraint = messageActionRowsView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+    var reactionsFrameTop: CGFloat?
+    if let reactionsPlan = layout.reactions, let reactionsView {
+      if reactionsView.superview === self {
+        let top = belowBubble + layout.reactionsOutsideBubbleTopInset
+        reactionsFrameTop = top
+        if hasAcknowledgement {
+          // On the bubble's left edge, left to right in either direction.
+          let bubbleLeft = mirrored ? size.width - bubbleX - bubbleSize.width : bubbleX
+          place(
+            reactionsView,
+            x: bubbleLeft + reactionsPlan.spacing.left,
+            top: top,
+            size: reactionsPlan.size,
+            in: size,
+            mirrored: false
+          )
+        } else {
+          place(
+            reactionsView,
+            x: outgoing
+              ? bubbleX + bubbleSize.width - reactionsPlan.spacing.right - reactionsPlan.size.width
+              : bubbleX + reactionsPlan.spacing.left,
+            top: top,
+            size: reactionsPlan.size,
+            in: size,
+            mirrored: mirrored
+          )
+        }
+      } else if reactionsView.superview === contentView {
+        place(
+          reactionsView,
+          x: reactionsPlan.spacing.left,
+          top: layout.reactionsViewTop,
+          size: reactionsPlan.size,
+          in: bubbleSize,
+          mirrored: mirrored
+        )
       }
-
-      constraints.append(
-        contentsOf: [
-          messageActionRowsWidthConstraint,
-          messageActionRowsHeightConstraint,
-          messageActionRowsTopConstraint,
-          messageActionRowsSideConstraint,
-        ].compactMap(\.self)
-      )
     }
 
-    // Text
-
-    if let text = layout.text, let textView = attachedTextHost {
-      textViewWidthConstraint = textView.widthAnchor
-        .constraint(equalToConstant: text.size.width)
-      textViewHeightConstraint = textView.heightAnchor
-        .constraint(equalToConstant: text.size.height)
-      textViewTopConstraint = textView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: layout.textContentViewTop
-      )
-      textViewLeadingConstraint = textView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor,
-        constant: text.spacing.left
-      )
-
-      constraints.append(
-        contentsOf: [
-          textViewHeightConstraint!,
-          textViewWidthConstraint!,
-          textViewTopConstraint!,
-          textViewLeadingConstraint!,
-        ]
-      )
-
-      // TODO: Handle RTL
-    }
-
-    // setupReactions owns and activates reaction constraints.
-
-    // Time
-    if let time = layout.time {
-      let timeWidthConstraint = timeAndStateView.widthAnchor.constraint(
-        equalToConstant: time.size.width
-      )
-      timeViewWidthConstraint = timeWidthConstraint
-      let timeHeightConstraint = timeAndStateView.heightAnchor.constraint(
-        equalToConstant: time.size.height
-      )
-      let timeTrailingConstraint = hasAcknowledgement
-        ? timeAndStateView.rightAnchor.constraint(
-          equalTo: bubbleView.rightAnchor,
-          constant: -time.spacing.right
-        )
-        : timeAndStateView.trailingAnchor.constraint(
-          equalTo: bubbleView.trailingAnchor,
-          constant: -time.spacing.right
-        )
-
-      self.timeViewTrailingConstraint = timeTrailingConstraint
-      constraints.append(contentsOf: [
-        timeWidthConstraint,
-        timeHeightConstraint,
-        timeTrailingConstraint,
-      ])
-
-      if reactionsOutsideBubble, hasAcknowledgement, let reactionsView {
-        timeViewBottomConstraint = timeAndStateView.bottomAnchor.constraint(
-          equalTo: reactionsView.bottomAnchor,
-          constant: -6
-        )
-        constraints.append(timeViewBottomConstraint!)
+    if let time = layout.time, timeAndStateView.superview === self {
+      let timeTop: CGFloat = if reactionsOutsideBubble, hasAcknowledgement,
+                                let reactionsFrameTop, let reactionsPlan = layout.reactions
+      {
+        reactionsFrameTop + reactionsPlan.size.height - 6 - time.size.height
       } else if layout.placesTimeAboveReactions {
-        timeViewTopConstraint = timeAndStateView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: layout.timeViewTop
-        )
-        constraints.append(timeViewTopConstraint!)
+        bubbleTop + layout.timeViewTop
       } else {
-        timeViewBottomConstraint = timeAndStateView.bottomAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
-          constant: -time.spacing.bottom
-        )
-        constraints.append(timeViewBottomConstraint!)
+        bubbleBottom - time.spacing.bottom - time.size.height
       }
-    }
-
-    if let forwardHeader = layout.forwardHeader {
-      forwardHeaderTopConstraint = forwardHeaderLabel.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: forwardHeader.spacing.top
-      )
-      forwardHeaderLeadingConstraint = forwardHeaderLabel.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor,
-        constant: forwardHeader.spacing.left
-      )
-      forwardHeaderTrailingConstraint = forwardHeaderLabel.trailingAnchor.constraint(
-        equalTo: contentView.trailingAnchor,
-        constant: -forwardHeader.spacing.right
-      )
-
-      constraints.append(
-        contentsOf: [
-          forwardHeaderLeadingConstraint!,
-          forwardHeaderTrailingConstraint!,
-          forwardHeaderTopConstraint!,
-        ]
-      )
-    }
-
-    if let reply = layout.reply {
-      replyViewTopConstraint = replyView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: layout.replyContentTop
-      )
-
-      constraints.append(
-        contentsOf: [
-          replyView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: reply.spacing.left),
-          replyView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -reply.spacing.right),
-          replyViewTopConstraint!,
-        ]
-      )
-    }
-
-    if let replyThreadSummaryView = replyThreadSummaryViewIfLoaded, replyThreadSummaryView.superview === contentView {
-      constraints.append(contentsOf: makeReplyThreadSummaryConstraints(for: replyThreadSummaryView))
-    }
-
-    // Document
-    if let document = layout.document {
-      documentViewTopConstraint = documentContainerView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: layout.documentContentViewTop
-      )
-      documentViewHeightConstraint = documentContainerView.heightAnchor.constraint(equalToConstant: document.size.height)
-      documentViewWidthConstraint = documentContainerView.widthAnchor.constraint(equalToConstant: document.size.width)
-
-      constraints.append(
-        contentsOf: [
-          documentViewTopConstraint!,
-          documentViewHeightConstraint!,
-          documentViewWidthConstraint!,
-          documentContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
-        ]
-      )
-    }
-
-    // // Attachments
-    // if let attachments = layout.attachments, let attachmentsView {
-    //   attachmentsViewTopConstraint = attachmentsView.topAnchor.constraint(
-    //     equalTo: contentView.topAnchor,
-    //     constant: layout.attachmentsContentViewTop
-    //   )
-
-    //   constraints.append(contentsOf: [
-    //     attachmentsViewTopConstraint!,
-    //     attachmentsView.leadingAnchor.constraint(
-    //       equalTo: contentView.leadingAnchor,
-    //       constant: 0
-    //     ),
-    //     attachmentsView.trailingAnchor.constraint(
-    //       equalTo: contentView.trailingAnchor,
-    //       constant: 0
-    //     ),
-    //   ])
-    // }
-
-    // Photo
-
-    if let photo = layout.photo {
-      photoViewTopConstraint = photoView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: layout.photoContentViewTop
-      )
-      photoViewLeadingConstraint = photoView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor, constant: photo.spacing.left
-      )
-      photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
-      photoViewWidthConstraint = photoView.widthAnchor
-        .constraint(equalToConstant: photo.size.width)
-      constraints.append(contentsOf: [
-        photoViewTopConstraint!,
-        photoViewHeightConstraint!,
-        photoViewWidthConstraint!,
-        photoViewLeadingConstraint!,
-      ])
-    }
-
-    // Video
-
-    if let video = layout.video {
-      videoViewTopConstraint = videoView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: layout.videoContentViewTop
-      )
-      videoViewLeadingConstraint = videoView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor, constant: video.spacing.left
-      )
-      videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
-      videoViewWidthConstraint = videoView.widthAnchor
-        .constraint(equalToConstant: video.size.width)
-      constraints.append(contentsOf: [
-        videoViewTopConstraint!,
-        videoViewHeightConstraint!,
-        videoViewWidthConstraint!,
-        videoViewLeadingConstraint!,
-      ])
+      if hasAcknowledgement {
+        // On the bubble's right edge, left to right in either direction.
+        let bubbleRight = mirrored ? size.width - bubbleX : bubbleX + bubbleSize.width
+        place(
+          timeAndStateView,
+          x: bubbleRight - time.spacing.right - time.size.width,
+          top: timeTop,
+          size: time.size,
+          in: size,
+          mirrored: false
+        )
+      } else {
+        place(
+          timeAndStateView,
+          x: bubbleX + bubbleSize.width - time.spacing.right - time.size.width,
+          top: timeTop,
+          size: time.size,
+          in: size,
+          mirrored: mirrored
+        )
+      }
     }
   }
 
-  // MARK: - Constraints
-
-  private var textViewWidthConstraint: NSLayoutConstraint?
-  private var textViewHeightConstraint: NSLayoutConstraint?
-  private var textViewTopConstraint: NSLayoutConstraint?
-  private var textViewLeadingConstraint: NSLayoutConstraint?
-
-  private var photoViewHeightConstraint: NSLayoutConstraint?
-  private var photoViewWidthConstraint: NSLayoutConstraint?
-  private var photoViewTopConstraint: NSLayoutConstraint?
-  /// Follows the media frame inset (`MessageSizeCalculator.mediaFrameInset`), which a reused view can change.
-  private var photoViewLeadingConstraint: NSLayoutConstraint?
-  private var videoViewLeadingConstraint: NSLayoutConstraint?
-
-  private var videoViewHeightConstraint: NSLayoutConstraint?
-  private var videoViewWidthConstraint: NSLayoutConstraint?
-  private var videoViewTopConstraint: NSLayoutConstraint?
-
-  private var replyViewTopConstraint: NSLayoutConstraint?
-  private var replyThreadSummaryViewTopConstraint: NSLayoutConstraint?
-  private var replyThreadSummaryViewLeadingConstraint: NSLayoutConstraint?
-  private var replyThreadSummaryViewTrailingConstraint: NSLayoutConstraint?
-  private var replyThreadSummaryViewHeightConstraint: NSLayoutConstraint?
-  private var forwardHeaderTopConstraint: NSLayoutConstraint?
-  private var forwardHeaderLeadingConstraint: NSLayoutConstraint?
-  private var forwardHeaderTrailingConstraint: NSLayoutConstraint?
-
-  private var documentViewTopConstraint: NSLayoutConstraint?
-  private var documentViewHeightConstraint: NSLayoutConstraint?
-  private var documentViewWidthConstraint: NSLayoutConstraint?
-
-  private var attachmentsViewTopConstraint: NSLayoutConstraint?
-  private var attachmentsViewLeadingConstraint: NSLayoutConstraint?
-  private var attachmentsViewWidthConstraint: NSLayoutConstraint?
-  private var attachmentsViewHeightConstraint: NSLayoutConstraint?
-  private var messageActionRowsWidthConstraint: NSLayoutConstraint?
-  private var messageActionRowsHeightConstraint: NSLayoutConstraint?
-  private var messageActionRowsTopConstraint: NSLayoutConstraint?
-  private var messageActionRowsSideConstraint: NSLayoutConstraint?
-
-  private var reactionViewWidthConstraint: NSLayoutConstraint!
-  private var reactionViewHeightConstraint: NSLayoutConstraint!
-  private var reactionViewTopConstraint: NSLayoutConstraint!
-  private var reactionViewLeadingConstraint: NSLayoutConstraint?
-  private var reactionViewTrailingConstraint: NSLayoutConstraint?
-
-  private var timeViewTopConstraint: NSLayoutConstraint?
-  private var timeViewWidthConstraint: NSLayoutConstraint?
-  private var timeViewBottomConstraint: NSLayoutConstraint?
-  private var timeViewTrailingConstraint: NSLayoutConstraint?
-
-  private var contentViewWidthConstraint: NSLayoutConstraint!
-  private var contentViewHeightConstraint: NSLayoutConstraint!
-
-  private var bubbleViewWidthConstraint: NSLayoutConstraint!
-  private var bubbleViewHeightConstraint: NSLayoutConstraint!
-  private var bubbleTailLeadingConstraint: NSLayoutConstraint?
-  private var bubbleTailTrailingConstraint: NSLayoutConstraint?
-
-  private var isInitialUpdateConstraint = true
-
-  override func updateConstraints() {
-    var skipUpdates = false
-    if isInitialUpdateConstraint {
-      setupConstraints()
-      isInitialUpdateConstraint = false
-      super.updateConstraints()
-      skipUpdates = true
+  /// Places the parts inside the content view. Their frames come from the plan alone, so they are set
+  /// as soon as a row is configured: a part that keeps constraints inside (the reply preview, the
+  /// attachments stack) must not join the window's layout engine at a zero size its contents can't fit.
+  private func layoutContentParts() {
+    let layout = props.layout
+    let bubbleSize = layout.bubble.size
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
+    if let forwardHeader = layout.forwardHeader, let label = forwardHeaderLabelIfLoaded, label.superview === contentView {
+      place(
+        label,
+        x: forwardHeader.spacing.left,
+        top: forwardHeader.spacing.top,
+        size: CGSize(
+          width: bubbleSize.width - forwardHeader.spacing.left - forwardHeader.spacing.right,
+          height: Theme.messageNameLabelHeight
+        ),
+        in: bubbleSize,
+        mirrored: mirrored
+      )
     }
 
-    // Setup/update attachments view constraints
-    if let attachments = props.layout.attachments {
-      applyAttachmentsLayout(attachments)
-    } else {
-      clearAttachmentsViewConstraints()
+    if let reply = layout.reply, replyView.superview === contentView {
+      place(
+        replyView,
+        x: reply.spacing.left,
+        top: layout.replyContentTop,
+        size: CGSize(width: bubbleSize.width - reply.spacing.left - reply.spacing.right, height: replyView.preferredHeight),
+        in: bubbleSize,
+        mirrored: mirrored
+      )
     }
 
-    if let actionsRows = props.layout.actionsRows, let messageActionRowsView {
-      let expectedSideAttribute: NSLayoutConstraint.Attribute = outgoing ? .trailing : .leading
-      let hasUnexpectedSideConstraint =
-        messageActionRowsSideConstraint?.firstAttribute != expectedSideAttribute
-
-      if messageActionRowsWidthConstraint == nil
-        || messageActionRowsHeightConstraint == nil
-        || messageActionRowsTopConstraint == nil
-        || messageActionRowsSideConstraint == nil
-        || hasUnexpectedSideConstraint
-      {
-        clearMessageActionRowsConstraints()
-
-        messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(
-          equalToConstant: actionsRows.size.width
-        )
-        messageActionRowsHeightConstraint = messageActionRowsView.heightAnchor.constraint(
-          equalToConstant: actionsRows.size.height
-        )
-        messageActionRowsTopConstraint = messageActionRowsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
-          constant: actionsRows.spacing.top
-        )
-
-        if outgoing {
-          messageActionRowsSideConstraint = messageActionRowsView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor)
-        } else {
-          messageActionRowsSideConstraint = messageActionRowsView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
-        }
-
-        NSLayoutConstraint.activate([
-          messageActionRowsWidthConstraint,
-          messageActionRowsHeightConstraint,
-          messageActionRowsTopConstraint,
-          messageActionRowsSideConstraint,
-        ].compactMap(\.self))
-      }
-    } else {
-      if messageActionRowsWidthConstraint != nil
-        || messageActionRowsHeightConstraint != nil
-        || messageActionRowsTopConstraint != nil
-        || messageActionRowsSideConstraint != nil
-      {
-        clearMessageActionRowsConstraints()
-      }
+    if let summaryView = replyThreadSummaryViewIfLoaded, summaryView.superview === contentView {
+      let summary = layout.replyThreadSummary
+      let left = summary?.spacing.left ?? 0
+      let right = summary?.spacing.right ?? 0
+      place(
+        summaryView,
+        x: left,
+        top: layout.replyThreadSummaryContentViewTop,
+        size: CGSize(
+          width: bubbleSize.width - left - right,
+          height: shouldShowReplyThreadSummary(for: props) ? (summary?.size.height ?? 0) : 0
+        ),
+        in: bubbleSize,
+        mirrored: mirrored
+      )
     }
 
-    // Initial setup handled the stable constraints. Optional message parts below
-    // still repair their constraints when a reused view gains or loses content.
-    if skipUpdates {
+    if let photo = layout.photo, let photoView = photoViewIfLoaded, photoView.superview === contentView {
+      place(
+        photoView,
+        x: photo.spacing.left,
+        top: layout.photoContentViewTop,
+        size: photo.size,
+        in: bubbleSize,
+        mirrored: mirrored
+      )
+      if let albumGridView { place(albumGridView, frame: photoView.frame) }
+    }
+
+    if let video = layout.video, videoView.superview === contentView {
+      place(
+        videoView,
+        x: video.spacing.left,
+        top: layout.videoContentViewTop,
+        size: video.size,
+        in: bubbleSize,
+        mirrored: mirrored
+      )
+    }
+
+    if let document = layout.document, documentContainerView.superview === contentView {
+      place(
+        documentContainerView,
+        x: document.spacing.left,
+        top: layout.documentContentViewTop,
+        size: document.size,
+        in: bubbleSize,
+        mirrored: mirrored
+      )
+    }
+
+    if let text = layout.text, let textHost = attachedTextHost {
+      place(
+        textHost,
+        x: text.spacing.left,
+        top: layout.textContentViewTop,
+        size: text.size,
+        in: bubbleSize,
+        mirrored: mirrored
+      )
+    }
+
+    if let attachments = layout.attachments, let attachmentsView, attachmentsView.superview === contentView {
+      place(
+        attachmentsView,
+        x: attachments.spacing.left,
+        top: layout.attachmentsContentViewTop,
+        size: attachments.size,
+        in: bubbleSize,
+        mirrored: mirrored
+      )
+    }
+  
+  }
+
+  /// A part's frame from its leading x and its top in a container of `container` size. As with
+  /// constraints, these place the part's alignment rect (a label's frame reaches past its text by
+  /// its cell's padding), rounded to the backing pixels.
+  private func place(_ view: NSView, x: CGFloat, top: CGFloat, size: CGSize, in container: CGSize, mirrored: Bool) {
+    let rect = NSRect(
+      x: mirrored ? container.width - x - size.width : x,
+      y: container.height - top - size.height,
+      width: size.width,
+      height: size.height
+    )
+    place(view, frame: backingAlignedRect(view.frame(forAlignmentRect: rect), options: .alignAllEdgesNearest))
+  }
+
+  private func place(_ view: NSView, frame: NSRect) {
+    guard view.frame != frame, !placesOnlyUnplacedParts || view.frame.isEmpty else { return }
+    let resized = view.frame.size != frame.size
+    view.frame = frame
+    // A label first placed before the row had its size (truncated, or empty) doesn't redraw on its
+    // own when it grows.
+    if resized, view is NSTextField { view.needsDisplay = true }
+  }
+
+  /// Set while an animated update places the parts that just appeared, before the rest animate.
+  private var placesOnlyUnplacedParts = false
+
+  /// The message whose stream hides the time and status (and the "Sent via" it carries).
+  private var timeHiddenForStream: Int64?
+
+  /// While the body streams in (`MessageStreamPacer`), the time and status wait; the plan keeps their slot, so the
+  /// row doesn't move when they show. They fade in when that message's stream ends, as on iOS.
+  func syncStreamingState() {
+    let id = fullMessage.id
+    let streaming = MessageStreamPacer.shared.isStreaming(id)
+    if streaming {
+      guard timeHiddenForStream != id else { return }
+      timeHiddenForStream = id
+      timeAndStateView.isHidden = true
       return
     }
-
-    // Text can appear/disappear when a view is reused for a different message.
-    syncTextViewForCurrentProps()
-    if let text = props.layout.text, let textView = attachedTextHost {
-      var constraintsToActivate: [NSLayoutConstraint] = []
-      if textViewWidthConstraint == nil {
-        textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: text.size.width)
-        constraintsToActivate.append(textViewWidthConstraint!)
-      }
-      if textViewHeightConstraint == nil {
-        textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: text.size.height)
-        constraintsToActivate.append(textViewHeightConstraint!)
-      }
-      if textViewTopConstraint == nil {
-        textViewTopConstraint = textView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: props.layout.textContentViewTop
-        )
-        constraintsToActivate.append(textViewTopConstraint!)
-      }
-      if textViewLeadingConstraint == nil {
-        textViewLeadingConstraint = textView.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: text.spacing.left
-        )
-        constraintsToActivate.append(textViewLeadingConstraint!)
-      }
-      NSLayoutConstraint.activate(constraintsToActivate)
-
-      log.trace("Updating text view constraints for message \(text.size)")
-      if textViewWidthConstraint?.constant != text.size.width {
-        textViewWidthConstraint?.constant = text.size.width
-      }
-
-      if textViewHeightConstraint?.constant != text.size.height {
-        textViewHeightConstraint?.constant = text.size.height
-      }
-
-      if textViewTopConstraint?.constant != props.layout.textContentViewTop {
-        textViewTopConstraint?.constant = props.layout.textContentViewTop
-      }
-
-      if textViewLeadingConstraint?.constant != text.spacing.left {
-        textViewLeadingConstraint?.constant = text.spacing.left
-      }
-    } else {
-      clearTextViewConstraints()
+    guard let hiddenFor = timeHiddenForStream else { return }
+    timeHiddenForStream = nil
+    timeAndStateView.isHidden = false
+    guard hiddenFor == id else {
+      timeAndStateView.alphaValue = 1
+      return
     }
-
-    if let reply = props.layout.reply,
-       let replyViewTopConstraint
-    {
-      log.trace("Updating reply view constraints for message \(reply.size)")
-      if replyViewTopConstraint.constant != props.layout.replyContentTop {
-        replyViewTopConstraint.constant = props.layout.replyContentTop
-      }
+    timeAndStateView.alphaValue = 0
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.2
+      timeAndStateView.animator().alphaValue = 1
     }
+  }
 
-    if let replyThreadSummaryViewTopConstraint,
-       let replyThreadSummaryViewLeadingConstraint,
-       let replyThreadSummaryViewTrailingConstraint,
-       let replyThreadSummaryViewHeightConstraint
-    {
-      let summaryPlan = props.layout.replyThreadSummary
-      let showSummary = shouldShowReplyThreadSummary(for: props)
-      replyThreadSummaryViewTopConstraint.constant = props.layout.replyThreadSummaryContentViewTop
-      replyThreadSummaryViewLeadingConstraint.constant = summaryPlan?.spacing.left ?? 0
-      replyThreadSummaryViewTrailingConstraint.constant = -(summaryPlan?.spacing.right ?? 0)
-      replyThreadSummaryViewHeightConstraint.constant = showSummary ? (summaryPlan?.size.height ?? 0) : 0
-      replyThreadSummaryViewIfLoaded?.isHidden = !showSummary
-    }
+  /// The sender name's width, measured once per name: the label's natural width, as Auto Layout gave it.
+  private var nameLabelWidth: CGFloat {
+    let name = nameLabel.stringValue
+    if let measuredNameLabelWidth, measuredNameLabelWidth.name == name { return measuredNameLabelWidth.width }
+    let width = nameLabel.intrinsicContentSize.width
+    measuredNameLabelWidth = (name, width)
+    return width
+  }
 
-    if let forwardHeader = props.layout.forwardHeader {
-      if forwardHeaderLabel.superview == nil {
-        contentView.addSubview(forwardHeaderLabel)
-      }
+  private var measuredNameLabelWidth: (name: String, width: CGFloat)?
 
-      if forwardHeaderTopConstraint == nil
-        || forwardHeaderLeadingConstraint == nil
-        || forwardHeaderTrailingConstraint == nil
-      {
-        forwardHeaderTopConstraint = forwardHeaderLabel.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: forwardHeader.spacing.top
-        )
-        forwardHeaderLeadingConstraint = forwardHeaderLabel.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: forwardHeader.spacing.left
-        )
-        forwardHeaderTrailingConstraint = forwardHeaderLabel.trailingAnchor.constraint(
-          equalTo: contentView.trailingAnchor,
-          constant: -forwardHeader.spacing.right
-        )
-        NSLayoutConstraint.activate([
-          forwardHeaderTopConstraint!,
-          forwardHeaderLeadingConstraint!,
-          forwardHeaderTrailingConstraint!,
-        ])
-      }
+  override func setFrameSize(_ newSize: NSSize) {
+    let changed = newSize != frame.size
+    super.setFrameSize(newSize)
+    if changed { needsLayout = true }
+  }
 
-      guard let forwardHeaderTopConstraint,
-            let forwardHeaderLeadingConstraint,
-            let forwardHeaderTrailingConstraint
-      else {
-        super.updateConstraints()
-        return
-      }
-
-      log.trace("Updating forward header constraints for message \(forwardHeader.size)")
-      if forwardHeaderTopConstraint.constant != forwardHeader.spacing.top {
-        forwardHeaderTopConstraint.constant = forwardHeader.spacing.top
-      }
-
-      if forwardHeaderLeadingConstraint.constant != forwardHeader.spacing.left {
-        forwardHeaderLeadingConstraint.constant = forwardHeader.spacing.left
-      }
-
-      let trailingConstant = -forwardHeader.spacing.right
-      if forwardHeaderTrailingConstraint.constant != trailingConstant {
-        forwardHeaderTrailingConstraint.constant = trailingConstant
-      }
-    }
-
-    if let photo = props.layout.photo,
-       let photoViewHeightConstraint,
-       let photoViewWidthConstraint,
-       let photoViewTopConstraint
-    {
-      log.trace("Updating photo view constraints for message \(photo.size)")
-      if photoViewHeightConstraint.constant != photo.size.height {
-        photoViewHeightConstraint.constant = photo.size.height
-      }
-
-      if photoViewWidthConstraint.constant != photo.size.width {
-        photoViewWidthConstraint.constant = photo.size.width
-      }
-
-      if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
-        photoViewTopConstraint.constant = props.layout.photoContentViewTop
-      }
-      if let photoViewLeadingConstraint, photoViewLeadingConstraint.constant != photo.spacing.left {
-        photoViewLeadingConstraint.constant = photo.spacing.left
-      }
-    } else if let photo = props.layout.photo {
-      if photoView.superview == nil {
-        contentView.addSubview(photoView)
-      }
-      photoViewTopConstraint = photoView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: props.layout.photoContentViewTop
-      )
-      photoViewLeadingConstraint = photoView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor, constant: photo.spacing.left
-      )
-      photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
-      photoViewWidthConstraint = photoView.widthAnchor.constraint(equalToConstant: photo.size.width)
-      NSLayoutConstraint.activate([
-        photoViewTopConstraint!,
-        photoViewHeightConstraint!,
-        photoViewWidthConstraint!,
-        photoViewLeadingConstraint!,
-      ])
-    }
-
-    if let video = props.layout.video,
-       let videoViewHeightConstraint,
-       let videoViewWidthConstraint,
-       let videoViewTopConstraint
-    {
-      log.trace("Updating video view constraints for message \(video.size)")
-      if videoViewHeightConstraint.constant != video.size.height {
-        videoViewHeightConstraint.constant = video.size.height
-      }
-
-      if videoViewWidthConstraint.constant != video.size.width {
-        videoViewWidthConstraint.constant = video.size.width
-      }
-
-      if videoViewTopConstraint.constant != props.layout.videoContentViewTop {
-        videoViewTopConstraint.constant = props.layout.videoContentViewTop
-      }
-      if let videoViewLeadingConstraint, videoViewLeadingConstraint.constant != video.spacing.left {
-        videoViewLeadingConstraint.constant = video.spacing.left
-      }
-    } else if let video = props.layout.video {
-      // Set up constraints if they didn't exist (e.g. view reused for a different message)
-      if videoView.superview == nil {
-        contentView.addSubview(videoView)
-      }
-      videoViewTopConstraint = videoView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: props.layout.videoContentViewTop
-      )
-      videoViewLeadingConstraint = videoView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor, constant: video.spacing.left
-      )
-      videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
-      videoViewWidthConstraint = videoView.widthAnchor.constraint(equalToConstant: video.size.width)
-      NSLayoutConstraint.activate([
-        videoViewTopConstraint!,
-        videoViewHeightConstraint!,
-        videoViewWidthConstraint!,
-        videoViewLeadingConstraint!,
-      ])
-    }
-
-    if let document = props.layout.document,
-       let documentViewTopConstraint,
-       let documentViewHeightConstraint,
-       let documentViewWidthConstraint
-    {
-      log.trace("Updating document view constraints for message \(document.size)")
-      let documentTop = props.layout.documentContentViewTop
-      if documentViewTopConstraint.constant != documentTop {
-        documentViewTopConstraint.constant = documentTop
-      }
-      if documentViewHeightConstraint.constant != document.size.height {
-        documentViewHeightConstraint.constant = document.size.height
-      }
-      if documentViewWidthConstraint.constant != document.size.width {
-        documentViewWidthConstraint.constant = document.size.width
-      }
-    } else if let document = props.layout.document {
-      if documentContainerView.superview == nil {
-        contentView.addSubview(documentContainerView)
-      }
-      syncDocumentSlotView()
-      documentViewTopConstraint = documentContainerView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: props.layout.documentContentViewTop
-      )
-      documentViewHeightConstraint = documentContainerView.heightAnchor.constraint(equalToConstant: document.size.height)
-      documentViewWidthConstraint = documentContainerView.widthAnchor.constraint(equalToConstant: document.size.width)
-      NSLayoutConstraint.activate([
-        documentViewTopConstraint!,
-        documentViewHeightConstraint!,
-        documentViewWidthConstraint!,
-        documentContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
-      ])
-    }
-
-    if let bubbleViewWidthConstraint,
-       let bubbleViewHeightConstraint,
-       let contentViewWidthConstraint,
-       let contentViewHeightConstraint
-    {
-      let bubble = props.layout.bubble
-      log.trace("Updating bubble view constraints for message \(bubble.size)")
-      bubbleTailView.bubbleSize = bubble.size
-      if bubbleViewWidthConstraint.constant != bubble.size.width {
-        bubbleViewWidthConstraint.constant = bubble.size.width
-      }
-
-      if bubbleViewHeightConstraint.constant != bubble.size.height {
-        bubbleViewHeightConstraint.constant = bubble.size.height
-      }
-
-      if contentViewWidthConstraint.constant != bubble.size.width {
-        contentViewWidthConstraint.constant = bubble.size.width
-      }
-
-      if contentViewHeightConstraint.constant != bubble.size.height {
-        contentViewHeightConstraint.constant = bubble.size.height
-      }
-    }
-
-    if let actionsRows = props.layout.actionsRows,
-       let messageActionRowsWidthConstraint,
-       let messageActionRowsHeightConstraint,
-       let messageActionRowsTopConstraint
-    {
-      if messageActionRowsWidthConstraint.constant != actionsRows.size.width {
-        messageActionRowsWidthConstraint.constant = actionsRows.size.width
-      }
-
-      if messageActionRowsHeightConstraint.constant != actionsRows.size.height {
-        messageActionRowsHeightConstraint.constant = actionsRows.size.height
-      }
-
-      if messageActionRowsTopConstraint.constant != actionsRows.spacing.top {
-        messageActionRowsTopConstraint.constant = actionsRows.spacing.top
-      }
-    }
-
-    // Update reaction constraints
-    if let reactionsPlan = props.layout.reactions,
-       let reactionViewWidthConstraint,
-       let reactionViewHeightConstraint,
-       let existingReactionViewTopConstraint = reactionViewTopConstraint
-    {
-      log.trace("Updating reactions view constraints for message \(reactionsPlan.size)")
-      if reactionViewWidthConstraint.constant != reactionsPlan.size.width {
-        reactionViewWidthConstraint.constant = reactionsPlan.size.width
-      }
-
-      if reactionViewHeightConstraint.constant != reactionsPlan.size.height {
-        reactionViewHeightConstraint.constant = reactionsPlan.size.height
-      }
-
-      let reactionTopConstant = props.layout.reactionsOutsideBubble
-        ? props.layout.reactionsOutsideBubbleTopInset
-        : props.layout.reactionsViewTop
-      if props.layout.reactionsOutsideBubble {
-        existingReactionViewTopConstraint.isActive = false
-        self.reactionViewTopConstraint = reactionsView?.topAnchor.constraint(
-          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
-          constant: reactionTopConstant
-        )
-        self.reactionViewTopConstraint?.isActive = true
-      } else if existingReactionViewTopConstraint.constant != reactionTopConstant {
-        existingReactionViewTopConstraint.constant = reactionTopConstant
-      }
-      if props.layout.reactionsOutsideBubble, hasAcknowledgement {
-        if let reactionViewLeadingConstraint,
-           reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
-        {
-          reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
-        }
-      } else if props.layout.reactionsOutsideBubble, outgoing {
-        if let reactionViewTrailingConstraint,
-           reactionViewTrailingConstraint.constant != -reactionsPlan.spacing.right
-        {
-          reactionViewTrailingConstraint.constant = -reactionsPlan.spacing.right
-        }
-      } else {
-        if let reactionViewLeadingConstraint,
-           reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
-        {
-          reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
-        }
-      }
-    }
-
-    if let time = props.layout.time {
-      let trailingConstant = -time.spacing.right
-      if timeViewTrailingConstraint?.constant != trailingConstant {
-        timeViewTrailingConstraint?.constant = trailingConstant
-      }
-      // A "Sent via …" prefix comes and goes with the end of an agent's run.
-      if let timeViewWidthConstraint, timeViewWidthConstraint.constant != time.size.width {
-        timeViewWidthConstraint.constant = time.size.width
-      }
-      if props.layout.placesTimeAboveReactions {
-        if let timeViewTopConstraint {
-          if timeViewTopConstraint.constant != props.layout.timeViewTop {
-            timeViewTopConstraint.constant = props.layout.timeViewTop
-          }
-        } else {
-          timeViewBottomConstraint?.isActive = false
-          timeViewBottomConstraint = nil
-          timeViewTopConstraint = timeAndStateView.topAnchor.constraint(
-            equalTo: contentView.topAnchor,
-            constant: props.layout.timeViewTop
-          )
-          timeViewTopConstraint?.isActive = true
-        }
-      } else {
-        let bottomConstant = reactionsOutsideBubble && hasAcknowledgement
-          ? -6
-          : -time.spacing.bottom
-        if let timeViewBottomConstraint {
-          if timeViewBottomConstraint.constant != bottomConstant {
-            timeViewBottomConstraint.constant = bottomConstant
-          }
-        } else {
-          timeViewTopConstraint?.isActive = false
-          timeViewTopConstraint = nil
-          timeViewBottomConstraint = timeAndStateView.bottomAnchor.constraint(
-            equalTo: bubbleView.bottomAnchor,
-            constant: bottomConstant
-          )
-          timeViewBottomConstraint?.isActive = true
-        }
-      }
-    }
-//    if hasReactions {
-//      for (index, reaction) in reactionItems.enumerated() {
-//        if let constraints = reactionItemConstraints[reaction] {
-//          let newLeadingConstant = CGFloat(index) *
-//            (props.layout.reactionsSize.width + props.layout.reactionsSpacing.left)
-//          if constraints.leading.constant != newLeadingConstant {
-//            constraints.leading.constant = newLeadingConstant
-//          }
-//
-//          if constraints.width.constant != props.layout.reactionsSize.width {
-//            constraints.width.constant = props.layout.reactionsSize.width
-//          }
-//
-//          if constraints.height.constant != props.layout.reactionsSize.height {
-//            constraints.height.constant = props.layout.reactionsSize.height
-//          }
-//        }
-//      }
-//    }
-
-    super.updateConstraints()
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    // Frames are aligned to the backing pixels; a row laid out before it joined a window used 1x.
+    needsLayout = true
   }
 
   private func setupMessageText() {
@@ -4490,22 +3799,23 @@ class MessageViewAppKit: NSView {
     self.props = props
     syncBubbleTail(animated: animate)
 
+    // Nothing is laid out here: frames follow the plan in `layout()`, and the list lays the row out
+    // on its next pass. `setLayoutWidth` only marks the width for that pass, and new text that
+    // follows (row reuse) lays out at it at once, so the text lays out once, at the new width.
+    // Animating, the pass below runs before the next message's text, so its width waits for it.
     if usesCoreText {
-      // When the next message's text follows (row reuse), a width set before the layout pass
-      // below would lay the previous message's text out again at the new width.
-      if !textFollows { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
+      if !(textFollows && animate) { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
     } else if isNativeTextViewLoaded, textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
       textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
-
-    layoutSubtreeIfNeeded()
-    if textFollows, usesCoreText { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
-
-    needsUpdateConstraints = true
+    needsLayout = true
 
     if animate {
-      // Animate the changes
+      // Parts that just appeared take their frames at once; the others move to theirs.
+      placesOnlyUnplacedParts = true
+      layoutParts()
+      placesOnlyUnplacedParts = false
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.15
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -4525,6 +3835,7 @@ class MessageViewAppKit: NSView {
             .layoutViewport()
         }
       }
+      if textFollows, usesCoreText { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
     }
   }
 
@@ -4566,23 +3877,15 @@ class MessageViewAppKit: NSView {
       syncDocumentSlotView()
     } else {
       documentContainerView.removeFromSuperview()
-      documentViewTopConstraint = nil
-      documentViewHeightConstraint = nil
-      documentViewWidthConstraint = nil
     }
 
-    // Update related message for reply view
-    if props.layout.hasReply {
-      replyView.setRelatedMessage(fullMessage.message)
-      replyView.setStyle(embeddedReplyStyle(for: props))
-      if let embeddedMessage = fullMessage.repliedToMessage {
-        replyView.update(with: embeddedMessage, kind: .replyInMessage)
-      }
-    }
+    // Reply preview: added, refilled or removed
+    syncReplyView(for: props)
     updateReplyThreadSummaryView(for: props)
 
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, textFollows: true, animate: animate)
+    syncSenderViews()
 
     // Reactions
     // TODO: Reactions are not updating as expected
@@ -4592,9 +3895,8 @@ class MessageViewAppKit: NSView {
     syncTextViewForCurrentProps()
     setupMessageText()
 
-    // Update bubble background
+    // Update bubble background (the tail was synced with the props above)
     bubbleView.backgroundColor = bubbleBackgroundColor
-    syncBubbleTail(animated: animate)
     syncContinuousBubbleGradient()
 
     syncForwardHeaderView(for: props)
@@ -4603,6 +3905,9 @@ class MessageViewAppKit: NSView {
     // Under an album the photo view only holds the slot: nothing to load.
     if hasPhoto, props.album == nil {
       photoView.update(with: fullMessage)
+    } else if !hasPhoto, let photoViewIfLoaded, photoViewIfLoaded.superview != nil {
+      // A reused view showing a message without the photo (`MessageTableCell.configure` allows only that change).
+      photoViewIfLoaded.removeFromSuperview()
     }
     syncAlbumGrid()
 
@@ -4612,6 +3917,8 @@ class MessageViewAppKit: NSView {
         contentView.addSubview(videoView)
       }
       videoView.update(with: fullMessage)
+    } else if let videoViewIfLoaded, videoViewIfLoaded.superview != nil {
+      videoViewIfLoaded.removeFromSuperview()
     }
 
     // Document
@@ -4632,7 +3939,6 @@ class MessageViewAppKit: NSView {
         contentView.addSubview(attachmentsView!)
       }
     } else {
-      clearAttachmentsViewConstraints()
       attachmentsView?.removeFromSuperview()
       attachmentsView = nil
     }
@@ -4654,9 +3960,8 @@ class MessageViewAppKit: NSView {
       didReachThreshold = false
     }
 
-    // Experimental: I wanted to add this for external task attachments when created, but I'm just adding it here.
-    // Force update constraints
-    needsUpdateConstraints = true
+    needsLayout = true
+    layoutContentParts()
   }
 
   func updateSize(props: MessageViewProps) {
@@ -4668,6 +3973,7 @@ class MessageViewAppKit: NSView {
       disableTextRelayout: true
     )
     syncAlbumGrid()
+    attachmentsView?.apply(itemPlans: props.layout.attachmentItems)
 
     if let richBlockPlan = props.layout.richBlockContent,
        let richBlockContentView
@@ -4683,6 +3989,7 @@ class MessageViewAppKit: NSView {
     // if hasReactions {
     updateReactionsSizes()
     // }
+    layoutContentParts()
   }
 
   private func setTimeAndStateVisibility(visible _: Bool) {
@@ -5249,8 +4556,9 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if showsInlineAvatar, avatarView.superview != nil {
-      let pointInAvatar = avatarView.convert(point, from: self)
+    if showsInlineAvatar, let avatarSuperview = avatarView.superview {
+      // `UserAvatarView.hitTest` takes the point in its superview's coordinates (AppKit's contract).
+      let pointInAvatar = avatarSuperview.convert(point, from: self)
       if let hit = avatarView.hitTest(pointInAvatar) {
         MessageGestureTrace.trace(
           "MessageView.interactiveHitTest messageId=\(message.messageId) target=avatar point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInAvatar)) hit=\(type(of: hit))"
@@ -5719,14 +5027,6 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     menu.delegate = self
     return menu
-  }
-}
-
-// Helper extension for constraint priorities
-private extension NSLayoutConstraint {
-  func withPriority(_ priority: NSLayoutConstraint.Priority) -> NSLayoutConstraint {
-    self.priority = priority
-    return self
   }
 }
 

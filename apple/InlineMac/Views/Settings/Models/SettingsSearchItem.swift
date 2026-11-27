@@ -106,6 +106,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case quickForward
   case stableChatRoute
   case coreTextMessageText
+  case timelineMessageList
   case fileBrowser
   case nativeFileDownloads
 
@@ -169,7 +170,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .inlineMathAttachments,
-         .messageWidgets, .quickForward, .stableChatRoute, .coreTextMessageText,
+         .messageWidgets, .quickForward, .stableChatRoute, .coreTextMessageText, .timelineMessageList,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -256,6 +257,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .quickForward: "Quick Forward"
     case .stableChatRoute: "Faster Chat Switching"
     case .coreTextMessageText: "Core Text Message Text"
+    case .timelineMessageList: "New Message List"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
     case .syncEngine: "Sync Engine"
@@ -320,7 +322,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .inlineMathAttachments,
          .messageWidgets:
       "Agents"
-    case .quickForward, .stableChatRoute, .coreTextMessageText: "Messages"
+    case .quickForward, .stableChatRoute, .coreTextMessageText, .timelineMessageList: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -408,6 +410,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .quickForward: ["forward"]
     case .stableChatRoute: ["performance", "speed", "switch", "toolbar"]
     case .coreTextMessageText: ["performance", "renderer", "text", "scroll", "core text"]
+    case .timelineMessageList: ["message list", "timeline", "scroll", "performance", "animation"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]
     case .syncEngine: ["realtime", "sync"]

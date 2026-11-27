@@ -122,6 +122,8 @@ class MessageTimeAndState: NSView {
   }
 
   private var timeWidth: CGFloat = 0.0
+  /// The appearance the text color and status image were resolved for.
+  private var contentAppearance: NSAppearance.Name?
 
   // Dynamic scale factor handling
   private var effectiveScaleFactor: CGFloat {
@@ -194,11 +196,20 @@ class MessageTimeAndState: NSView {
 
   override func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
+    // Re-parenting a row reports a change without one.
+    guard effectiveScaleFactor != appliedScaleFactor else { return }
     updateScaleFactors()
   }
 
+  /// The scale the layers were last set for by `updateScaleFactors`.
+  private var appliedScaleFactor: CGFloat = 0
+
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
+    // Re-parenting a row reports an appearance change without one; the text, its width and
+    // the status image only depend on which appearance it is.
+    guard effectiveAppearance.name != contentAppearance else { return }
+    contentAppearance = effectiveAppearance.name
     // Switch in sync with the bubble background instead of cross-fading.
     CATransaction.begin()
     CATransaction.setDisableActions(true)
@@ -210,6 +221,7 @@ class MessageTimeAndState: NSView {
 
   private func updateScaleFactors() {
     let scale = effectiveScaleFactor
+    appliedScaleFactor = scale
     timeLayer.contentsScale = scale
     statusLayer.contentsScale = scale
     statusLayer.rasterizationScale = scale
@@ -254,18 +266,36 @@ class MessageTimeAndState: NSView {
     updateTooltip()
   }
 
+  /// The tooltip's rect, registered once while it shows; AppKit asks for the text when the pointer rests on it
+  /// (`view(_:stringForToolTip:point:userData:)`), so rows that scroll past format no dates and register nothing.
+  private var toolTipTag: NSView.ToolTipTag?
+
   private func updateTooltip() {
-    guard showsToolTip else {
-      if toolTip != nil {
-        toolTip = nil
+    guard showsToolTip, !bounds.isEmpty else {
+      if let toolTipTag {
+        removeToolTip(toolTipTag)
+        self.toolTipTag = nil
       }
       return
     }
+    guard toolTipTag == nil else { return }
+    toolTipTag = addToolTip(bounds, owner: self, userData: nil)
+  }
+
+  fileprivate var tooltipText: String {
     let date = Self.tooltipFormatter.string(from: fullMessage.message.date)
-    let tooltipText = viaDetail.map { "\($0)\n\(date)" } ?? date
-    if toolTip != tooltipText {
-      toolTip = tooltipText
+    return viaDetail.map { "\($0)\n\(date)" } ?? date
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    let resized = newSize != frame.size
+    super.setFrameSize(newSize)
+    guard resized else { return }
+    if let toolTipTag {
+      removeToolTip(toolTipTag)
+      self.toolTipTag = nil
     }
+    updateTooltip()
   }
 
   // MARK: - Layout
@@ -388,15 +418,25 @@ class MessageTimeAndState: NSView {
   }
 
   private func updateContent() {
+    contentAppearance = effectiveAppearance.name
     updateTimeContent()
     updateStatusContent()
     updateColorStyles()
   }
 
   private func updateTimeContent() {
-    let string = isFailedMessage
-      ? "Failed"
-      : (viaPrefix ?? "") + Self.formatter.string(from: fullMessage.message.date)
+    let string: String
+    if isFailedMessage {
+      string = "Failed"
+      timeWidth = Self.width(of: string)
+    } else if let viaPrefix {
+      string = viaPrefix + Self.timeText(for: fullMessage.message.date).string
+      timeWidth = Self.width(of: string)
+    } else {
+      let text = Self.timeText(for: fullMessage.message.date)
+      string = text.string
+      timeWidth = text.width
+    }
     let attributedString = NSAttributedString(
       string: string,
       attributes: [
@@ -405,8 +445,92 @@ class MessageTimeAndState: NSView {
       ]
     )
     timeLayer.string = attributedString
-    let size = attributedString.size()
-    timeWidth = size.width.rounded(.up)
+  }
+
+  /// Text widths by string: the font is fixed, and rows show the same few hundred times over and over.
+  private static var widths: [String: CGFloat] = [:]
+
+  private static func width(of string: String) -> CGFloat {
+    if let width = widths[string] { return width }
+    if widths.count > 4096 { widths.removeAll(keepingCapacity: true) }
+    let width = measuredWidth(of: string, font: font)
+    widths[string] = width
+    return width
+  }
+
+  /// The line's typographic width equals `NSAttributedString.size()` here (checked for every minute in ten locales,
+  /// "Sent via" prefixes included) at about half the cost. Safe off the main thread.
+  private nonisolated static func measuredWidth(of string: String, font: NSFont) -> CGFloat {
+    let line = CTLineCreateWithAttributedString(NSAttributedString(string: string, attributes: [.font: font]))
+    return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)).rounded(.up)
+  }
+
+  private static var widthPrefillGeneration = 0
+
+  /// The formatter's strings are bridged (with U+202F before AM/PM), and hashing a bridged string runs Unicode
+  /// normalization each time: a dictionary keyed by them cost ~10 ms to fill. Native UTF-8 hashes fast.
+  private nonisolated static func nativeString(_ string: String) -> String {
+    var native = string
+    native.makeContiguousUTF8()
+    return native
+  }
+
+  /// Measures every minute of a day in the current format off the main thread: messages are minutes apart, so most
+  /// rows show a time not seen yet, and each one cost a Core Text line in configure. Widths measured meanwhile win.
+  private static func prefillWidths() {
+    widthPrefillGeneration += 1
+    let generation = widthPrefillGeneration
+    guard let formatter = formatter.copy() as? DateFormatter else { return }
+    let font = font
+    DispatchQueue.global(qos: .utility).async {
+      var table: [String: CGFloat] = [:]
+      table.reserveCapacity(24 * 60)
+      let start = Calendar.current.startOfDay(for: Date())
+      for minute in 0 ..< 24 * 60 {
+        let string = nativeString(formatter.string(from: start.addingTimeInterval(TimeInterval(minute * 60))))
+        if table[string] == nil { table[string] = measuredWidth(of: string, font: font) }
+      }
+      let filled = table
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard generation == widthPrefillGeneration else { return }
+          if widths.isEmpty {
+            widths = filled
+          } else {
+            widths.merge(filled) { measured, _ in measured }
+          }
+        }
+      }
+    }
+  }
+
+  private struct TimeText {
+    let string: String
+    let width: CGFloat
+  }
+
+  /// Formatted times and their widths by absolute minute (the format shows hours and minutes only): formatting
+  /// and measuring were most of a reconfigure. Cleared with the format and when the time zone or locale changes.
+  private static var timeTexts: [Int64: TimeText] = [:]
+
+  private static let timeTextResetObservers: [NSObjectProtocol] = [
+    Notification.Name.NSSystemTimeZoneDidChange,
+    NSLocale.currentLocaleDidChangeNotification,
+  ].map { name in
+    NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+      MainActor.assumeIsolated { MessageTimeAndState.timeTexts.removeAll() }
+    }
+  }
+
+  private static func timeText(for date: Date) -> TimeText {
+    _ = timeTextResetObservers
+    let minute = Int64((date.timeIntervalSinceReferenceDate / 60).rounded(.down))
+    if let cached = timeTexts[minute] { return cached }
+    if timeTexts.count > 4096 { timeTexts.removeAll(keepingCapacity: true) }
+    let string = nativeString(formatter.string(from: date))
+    let text = TimeText(string: string, width: width(of: string))
+    timeTexts[minute] = text
+    return text
   }
 
   private func updateStatusContent() {
@@ -459,6 +583,8 @@ class MessageTimeAndState: NSView {
 
   // Must be called once
   static func precalculateTimeWidth() {
+    widths.removeAll()
+    timeTexts.removeAll()
     let formatter = DateFormatter()
     formatter.setLocalizedDateFormatFromTemplate("jmm")
     formatter.locale = Locale.autoupdatingCurrent
@@ -485,5 +611,12 @@ class MessageTimeAndState: NSView {
 
     MessageTimeAndState.timeWidth = ceil(timeWidth) + 4.0
     MessageTimeAndState.timeHeight = ceil(timeHeight) + 4.0
+    prefillWidths()
+  }
+}
+
+extension MessageTimeAndState: NSViewToolTipOwner {
+  func view(_: NSView, stringForToolTip _: NSView.ToolTipTag, point _: NSPoint, userData _: UnsafeMutableRawPointer?) -> String {
+    tooltipText
   }
 }

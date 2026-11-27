@@ -16,10 +16,28 @@ final class RichBlockContentView: NSView {
   private var nodeViews: [BlockContentPath: RichBlockRenderableView] = [:]
   /// Removed nodes still fading out. Never reused, hit-tested or selected.
   private var fadingOutViews: [RichBlockRenderableView] = []
+  /// Node views kept from earlier messages and plans, by kind, hidden in place: a reused row binds another
+  /// message's blocks into them instead of building new ones (a paragraph's text surface, a code block's buttons).
+  private var recycledViews: [RichBlockRenderKind: [RichBlockRenderableView]] = [:]
+  /// Kinds whose `prepareForReuse` and `apply` leave nothing of the last message.
+  private static let recycledKinds: Set<RichBlockRenderKind> = [.text, .listMarker, .code, .quote, .separator, .table]
+  private static let recycledViewsPerKind = 24
   private let styleCache = RichBlockStyledTextCache()
   private var previousSource: String?
   private var previousContent: InlineProtocol.BlockContent?
   private var currentPlan: RichBlockLayoutPlan?
+
+  /// streaming: the message's revealed count (`MessageStreamPacer`) drawn by the node holding it; the nodes before it
+  /// show whole and later ones are not in a revealing plan. Nil draws everything.
+  func reveal(_ count: Int?) {
+    guard let plan = currentPlan else { return }
+    for node in plan.nodes {
+      guard case let .text(text) = node.kind, text.literal == nil,
+            let view = nodeViews[node.path] as? RichBlockTextNodeView else { continue }
+      let local = count.map { $0 - text.rangeOffset }
+      view.setRevealedLength(local.flatMap { $0 < text.rangeLength ? max(0, $0) : nil })
+    }
+  }
   /// The last bind's inputs, to rebind when a width change alters which nodes exist.
   private var lastBind: (
     content: InlineProtocol.BlockContent,
@@ -30,6 +48,8 @@ final class RichBlockContentView: NSView {
     codePresentation: RichBlockCodePresentation,
     renderStyle: MessageRenderStyle
   )?
+  /// The appearance the nodes were last applied in.
+  private var boundAppearance: NSAppearance.Name?
   private var mathSnapshot: RichTextMath.Snapshot?
   private var mathLayoutSignature: Int = 0
   private var mathPreparationTask: Task<Void, Never>?
@@ -50,7 +70,10 @@ final class RichBlockContentView: NSView {
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-    clipsToBounds = true
+    // No clipping: AppKit doesn't draw a view nested in a clipping view while it is outside the window, so in the
+    // message list a rich message placed ahead of a fling came on screen with its bubble but without its text for a
+    // few frames (the Dev app; lab `draw.margin-rows-redraw`: 0 of 6 nested fields drew, 6 of 6 without the clip).
+    // Nodes that can overflow clip themselves (code and table scrollers, images, quotes).
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
   }
@@ -68,6 +91,8 @@ final class RichBlockContentView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  /// Binds the plan. Nodes are applied under this view's appearance: colors turned into layer colors (`cgColor`) or
+  /// faded with `withAlphaComponent` resolve in the appearance current at the call, which outside drawing is light.
   func update(
     plan: RichBlockLayoutPlan,
     content: InlineProtocol.BlockContent,
@@ -76,6 +101,45 @@ final class RichBlockContentView: NSView {
     palette: RichBlockPalette,
     relatedMessage: InlineKit.Message,
     codePresentation: RichBlockCodePresentation = .syntaxHighlighted,
+    renderStyle: MessageRenderStyle,
+    animated: Bool
+  ) {
+    // Before the row joins the window, the app's appearance (which the window follows) rather than the default one,
+    // so joining it doesn't bind again.
+    let appearance = window == nil ? NSApp.effectiveAppearance : effectiveAppearance
+    boundAppearance = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua])
+    appearance.performAsCurrentDrawingAppearance {
+      bind(
+        plan: plan, content: content, attributedText: attributedText, baseFontSize: baseFontSize, palette: palette,
+        relatedMessage: relatedMessage, codePresentation: codePresentation, renderStyle: renderStyle,
+        animated: animated
+      )
+    }
+  }
+
+  /// Light and dark resolve differently: the nodes are applied again in the new appearance.
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    guard window != nil, let lastBind, let currentPlan else { return }
+    let name = effectiveAppearance.bestMatch(
+      from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua]
+    )
+    guard name != boundAppearance else { return }
+    update(
+      plan: currentPlan, content: lastBind.content, attributedText: lastBind.attributedText,
+      baseFontSize: lastBind.baseFontSize, palette: lastBind.palette, relatedMessage: lastBind.relatedMessage,
+      codePresentation: lastBind.codePresentation, renderStyle: lastBind.renderStyle, animated: false
+    )
+  }
+
+  private func bind(
+    plan: RichBlockLayoutPlan,
+    content: InlineProtocol.BlockContent,
+    attributedText: NSAttributedString,
+    baseFontSize: CGFloat,
+    palette: RichBlockPalette,
+    relatedMessage: InlineKit.Message,
+    codePresentation: RichBlockCodePresentation,
     renderStyle: MessageRenderStyle,
     animated: Bool
   ) {
@@ -183,13 +247,13 @@ final class RichBlockContentView: NSView {
         fadingOutViews.append(removed)
         fadeOuts.append(removed)
       } else {
-        removed.prepareForReuse()
-        removed.removeFromSuperview()
+        recycle(removed)
       }
     }
 
     var frameChanges: [(RichBlockRenderableView, CGRect)] = []
     var fadeIns: [RichBlockRenderableView] = []
+    var tookRecycledViews = false
     for node in plan.nodes {
       let view: RichBlockRenderableView
       if let reusable = nodeViews[node.path],
@@ -197,9 +261,16 @@ final class RichBlockContentView: NSView {
       {
         view = reusable
       } else {
-        view = RichBlockViewFactory.make(for: node)
+        if let recycled = takeRecycledView(node.reuseKind) {
+          view = recycled
+          // Placed like a new view: it appears at its node, not sliding from where it was.
+          view.frame = node.frame
+          tookRecycledViews = true
+        } else {
+          view = RichBlockViewFactory.make(for: node)
+          addSubview(view)
+        }
         nodeViews[node.path] = view
-        addSubview(view)
         if fadesNodes {
           view.alphaValue = 0
           fadeIns.append(view)
@@ -238,6 +309,7 @@ final class RichBlockContentView: NSView {
       }
     }
 
+    if tookRecycledViews { restorePlanOrder(plan) }
     animate(frameChanges, fadeIns: fadeIns, fadeOuts: fadeOuts)
     mathMessageStableID = relatedMessage.stableId
     updateMathPreparation(math, layoutSignature: plan.mathSignature)
@@ -283,7 +355,17 @@ final class RichBlockContentView: NSView {
 
   private static func sameNodes(_ lhs: RichBlockLayoutPlan, _ rhs: RichBlockLayoutPlan) -> Bool {
     lhs.nodes.count == rhs.nodes.count
-      && zip(lhs.nodes, rhs.nodes).allSatisfy { $0.path == $1.path && $0.reuseKind == $1.reuseKind }
+      && zip(lhs.nodes, rhs.nodes).allSatisfy { $0.path == $1.path && $0.reuseKind == $1.reuseKind && sameContent($0, $1) }
+  }
+
+  /// streaming: a revealing plan shows more of a code block's text or more of a table's rows than the last one: those
+  /// nodes apply again (`bind`), as frames alone don't add lines or cells.
+  private static func sameContent(_ lhs: RichBlockLayoutPlan.Node, _ rhs: RichBlockLayoutPlan.Node) -> Bool {
+    switch (lhs.kind, rhs.kind) {
+      case let (.code(a), .code(b)): a.rangeLength == b.rangeLength
+      case let (.table(a), .table(b)): a.cells.count == b.cells.count
+      default: true
+    }
   }
 
   func setContentVisible(_ visible: Bool) {
@@ -325,8 +407,7 @@ final class RichBlockContentView: NSView {
     clearPreview()
     super.prepareForReuse()
     for view in nodeViews.values {
-      view.prepareForReuse()
-      view.removeFromSuperview()
+      recycle(view)
     }
     nodeViews.removeAll(keepingCapacity: true)
     // Their fade completions find nothing left to do.
@@ -341,6 +422,41 @@ final class RichBlockContentView: NSView {
     currentPlan = nil
     lastBind = nil
     messageIdentity = nil
+  }
+
+  /// Resets a node view for another message and keeps it, hidden, for a later node of its kind.
+  private func recycle(_ view: RichBlockRenderableView) {
+    view.prepareForReuse()
+    guard Self.recycledKinds.contains(view.reuseKind),
+          recycledViews[view.reuseKind, default: []].count < Self.recycledViewsPerKind
+    else {
+      view.removeFromSuperview()
+      return
+    }
+    view.isHidden = true
+    view.alphaValue = 1
+    recycledViews[view.reuseKind, default: []].append(view)
+  }
+
+  private func takeRecycledView(_ kind: RichBlockRenderKind) -> RichBlockRenderableView? {
+    guard let view = recycledViews[kind]?.popLast() else { return nil }
+    view.isHidden = false
+    return view
+  }
+
+  /// Nodes stack in plan order (a quote's fill under its text); a recycled view keeps its old place among the
+  /// subviews, so the order is set again when it differs. Setting `subviews` reorders without leaving the window.
+  private func restorePlanOrder(_ plan: RichBlockLayoutPlan) {
+    var rank: [ObjectIdentifier: Int] = [:]
+    for (index, node) in plan.nodes.enumerated() {
+      if let view = nodeViews[node.path] { rank[ObjectIdentifier(view)] = index }
+    }
+    let ranks = subviews.compactMap { rank[ObjectIdentifier($0)] }
+    guard zip(ranks, ranks.dropFirst()).contains(where: { $0 > $1 }) else { return }
+    let others = subviews.filter { rank[ObjectIdentifier($0)] == nil }
+    let nodes = subviews.filter { rank[ObjectIdentifier($0)] != nil }
+      .sorted { rank[ObjectIdentifier($0)]! < rank[ObjectIdentifier($1)]! }
+    subviews = others + nodes
   }
 
   override func viewDidMoveToWindow() {
@@ -409,6 +525,8 @@ final class RichBlockContentView: NSView {
         return disclosure.interactiveHitTest(local)
       }
       if let text = view as? NSTextView, text.isSelectable { return text }
+      // Text drawn in a layer (`RichBlockLayerText`) answers for its text as the native view does.
+      if let text = view as? CoreTextMessageView, text.surfaceText.length > 0 { return text }
       if view is NSControl || view is RichBlockMathNodeView { return view }
       for child in view.subviews.reversed() {
         if let hit = find(in: child) { return hit }

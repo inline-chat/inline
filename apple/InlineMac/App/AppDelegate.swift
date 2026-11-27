@@ -152,6 +152,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // A sidebar click's path: the history is prepared off the main thread, then the route commits.
       PerfJourneyRunner.start { peer in MainWindowController.all.first?.openChat(peer: peer, targetMessageId: nil) }
     }
+    if TimelineJourneyRunner.isRequested {
+      // The new message list's journeys (`scripts/macos/timeline-journey/run.sh`), same sidebar-click path.
+      TimelineJourneyRunner.start { peer in MainWindowController.all.first?.openChat(peer: peer, targetMessageId: nil) }
+    }
+    if WindowSizingProbe.isRequested {
+      WindowSizingProbe.start { peer in MainWindowController.all.first?.openChat(peer: peer, targetMessageId: nil) }
+    }
     #endif
     MessageGestureTrace.restoreSetting()
     let launchSpan = PerformanceTrace.begin("ApplicationDidFinish", category: .launch)

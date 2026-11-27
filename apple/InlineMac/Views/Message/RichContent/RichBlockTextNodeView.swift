@@ -5,8 +5,15 @@ final class RichBlockTextNodeView: RichBlockRenderableView {
 
   override var orderedTextSurfaces: [RichBlockTextSurface] { [surface] }
 
+  /// streaming: characters of this node's text drawn while its message streams; nil draws all.
+  func setRevealedLength(_ length: Int?) {
+    surface.setRevealedLength(length)
+  }
+
   init() {
     super.init(reuseKind: .text)
+    // Paragraphs, headings, list items and quotes draw in a layer when they can (`RichBlockLayerText`).
+    surface.prefersLayerText = true
     addSubview(surface)
   }
 
@@ -27,5 +34,10 @@ final class RichBlockTextNodeView: RichBlockRenderableView {
   override func layout() {
     super.layout()
     surface.frame = bounds
+  }
+
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    surface.prepareForReuse()
   }
 }

@@ -13,6 +13,9 @@ protocol MessageTableRenderableView: AnyObject {
   func containsListHoverPoint(_ point: NSPoint, from coordinateView: NSView) -> Bool
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem?
   func setAvatarSwipeProvider(_ provider: MessageAvatarSwipeProvider?)
+  /// Shows or hides what waits for a streaming body to finish (the time and status). Cheap: the end of a stream
+  /// can re-plan a row to the plan it already shows, which configures nothing else.
+  func syncStreamingState()
   func reset()
 }
 
@@ -28,6 +31,8 @@ extension MessageTableRenderableView where Self: NSView {
   }
 
   func setAvatarSwipeProvider(_: MessageAvatarSwipeProvider?) {}
+
+  func syncStreamingState() {}
 }
 
 extension MessageViewAppKit: MessageTableRenderableView {}
@@ -45,7 +50,6 @@ class MessageTableCell: NSView {
   private static let forwardSelectionCheckmarkCenterInset =
     Theme.messageSidePadding + ForwardMessageSelectionCheckmark.size / 2
   private var forwardSelectionCheckmark: ForwardMessageSelectionCheckmark?
-  private var messageTrailingConstraint: NSLayoutConstraint?
   private var forwardSelectionActive = false
 
   /// The rendered message's text, for the list's selection across blocks and messages.
@@ -66,7 +70,7 @@ class MessageTableCell: NSView {
     let checkmarkWasVisible = forwardSelectionCheckmark.map { !$0.isHidden } ?? false
     let modeChanged = wasActive != active
     forwardSelectionActive = active
-    messageTrailingConstraint?.constant = active ? -Self.forwardSelectionInset : 0
+    layoutMessageView()
 
     let showsCheckmark = active && selectable
     if showsCheckmark {
@@ -107,16 +111,12 @@ class MessageTableCell: NSView {
 
   private func makeCheckmark() -> ForwardMessageSelectionCheckmark {
     let checkmark = ForwardMessageSelectionCheckmark()
-    checkmark.translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`layoutMessageView`), centered near the trailing edge.
+    checkmark.translatesAutoresizingMaskIntoConstraints = true
     checkmark.isHidden = true
     addSubview(checkmark)
-    NSLayoutConstraint.activate([
-      checkmark.widthAnchor.constraint(equalToConstant: ForwardMessageSelectionCheckmark.size),
-      checkmark.heightAnchor.constraint(equalToConstant: ForwardMessageSelectionCheckmark.size),
-      checkmark.centerXAnchor.constraint(equalTo: trailingAnchor, constant: -Self.forwardSelectionCheckmarkCenterInset),
-      checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
     forwardSelectionCheckmark = checkmark
+    layoutMessageView()
     return checkmark
   }
 
@@ -217,6 +217,8 @@ class MessageTableCell: NSView {
       #if DEBUG
       MessageListPerfCounters.noteCell(.unchanged)
       #endif
+      // A stream's end re-plans its row; the plan can be the one already shown.
+      messageView?.syncStreamingState()
       return
     }
 
@@ -245,8 +247,9 @@ class MessageTableCell: NSView {
     }
 
     // RE-USE
-    // Minimal rows keep their view across senders and group positions: the update path sets the name
-    // label, avatar and spacing. Bot action rows are excluded, since their observation captures the sender.
+    // Minimal rows keep their view across senders and group positions: the update path adds, fills or removes the
+    // name label and avatar and sets the spacing. Bot action rows are excluded, since their observation captures the
+    // sender.
     let reusesAcrossSenders = !message.message.isServiceMessage
       && currentContent.map { Self.reusesAcrossSenders(from: $0.props, to: props) } ?? false
     if let currentContent,
@@ -257,23 +260,21 @@ class MessageTableCell: NSView {
        // same message layout
        currentContent.message.message.out == message.message.out || reusesAcrossSenders,
        currentContent.message.message.isServiceMessage == message.message.isServiceMessage,
-       currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
-       currentContent.message.message.hasForwardHeader == message.message.hasForwardHeader,
-       // exclude file/photo/video from reuse
-       currentContent.message.file?.id == message.file?.id,
-       currentContent.message.photoInfo?.id == message.photoInfo?.id,
-       currentContent.message.videoInfo?.id == message.videoInfo?.id,
-       currentContent.message.documentInfo?.id == message.documentInfo?.id,
-       // exclude reactions from reuse
-       currentContent.message.reactions == message.reactions || currentContent.message.id == message.id,
-       // exclude replies from reuse
-       currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id,
-       // disable re-use for file message completely for now until we can optimize later
-       // same message-level layout flags and same constraint graph
+       // another reply target: the update path fills the reply preview when the target is loaded
+       currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId
+         || Self.fillsReplyPreview(message),
+       // the same file, photo, video or document, or none: the update path removes media, never swaps it
+       Self.keepsOrDropsMedia(from: currentContent.message, to: message),
+       // Reactions: the update path rebuilds the chips (unanimated for another message).
+       currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id || Self.fillsReplyPreview(message),
+       // same message-level layout flags and same constraint graph; bubble rows lay out from the plan on every
+       // pass and sync what group position decides (tail, "Sent via", upload bar) on update
        reusesAcrossSenders
-         ? currentContent.props.equalExceptSizeAndGroupPosition(props)
+         ? currentContent.props.equalExceptSizeAndAnyGroupPosition(props)
+         : props.renderStyle == .bubble && !message.message.isServiceMessage
+         ? currentContent.props.equalExceptSizeAndAnyGroupPosition(props)
          : currentContent.props.equalExceptSize(props),
-       currentContent.props.layout.hasSameConstraintShape(as: props.layout)
+       Self.reusesShape(from: currentContent.props.layout, to: props.layout)
     // For now, recreate if moving from single line to multi line
     // , currentContent.props.layout.isSingleLine == props.layout.isSingleLine
     // different text
@@ -319,6 +320,38 @@ class MessageTableCell: NSView {
     #endif
   }
 
+  /// The reply preview can show `message`'s reply target in place of another one (a preview without a sender keeps
+  /// the previous name).
+  private static func fillsReplyPreview(_ message: FullMessage) -> Bool {
+    message.repliedToMessage?.from != nil
+  }
+
+  private static func keepsOrDropsMedia(from old: FullMessage, to new: FullMessage) -> Bool {
+    func keepsOrDrops<ID: Equatable>(_ old: ID?, _ new: ID?) -> Bool { new == nil || old == new }
+    return keepsOrDrops(old.file?.id, new.file?.id)
+      && keepsOrDrops(old.photoInfo?.id, new.photoInfo?.id)
+      && keepsOrDrops(old.videoInfo?.id, new.videoInfo?.id)
+      && keepsOrDrops(old.documentInfo?.id, new.documentInfo?.id)
+  }
+
+  /// Shape changes the message views make in place on update (frames come from the plan on every pass): the name
+  /// label, inline avatar, forward header, reply preview, text and reactions come and go, the time and reactions
+  /// move, and media can leave. The rest keeps its views and must match.
+  private static func reusesShape(
+    from old: MessageSizeCalculator.LayoutPlans, to new: MessageSizeCalculator.LayoutPlans
+  ) -> Bool {
+    (old.hasPhoto == new.hasPhoto || !new.hasPhoto)
+      && (old.hasVideo == new.hasVideo || !new.hasVideo)
+      && (old.hasDocument == new.hasDocument || !new.hasDocument)
+      && old.hasReplyThreadSummary == new.hasReplyThreadSummary
+      && old.hasActionsRows == new.hasActionsRows
+      && old.hasAttachments == new.hasAttachments
+      && old.attachmentItems.map(\.size.height) == new.attachmentItems.map(\.size.height)
+      && old.attachmentItems.elementsEqual(new.attachmentItems) {
+        $0.urlPreview?.mode == $1.urlPreview?.mode && $0.urlPreview?.largeStyle == $1.urlPreview?.largeStyle
+      }
+  }
+
   private static func reusesAcrossSenders(from old: MessageViewProps, to new: MessageViewProps) -> Bool {
     old.renderStyle == .minimal && new.renderStyle == .minimal
       && !old.layout.hasActionsRows && !new.layout.hasActionsRows
@@ -337,38 +370,29 @@ class MessageTableCell: NSView {
     var r: [String] = []
     func check(_ name: String, _ same: Bool) { if !same { r.append(name) } }
     check("samemsg", a.message.id != b.message.id)
-    check("sender", a.message.fromId == b.message.fromId)
-    check("out", a.message.out == b.message.out)
+    let acrossSenders = !b.message.isServiceMessage && reusesAcrossSenders(from: ap, to: bp)
+    check("sender", acrossSenders || a.message.fromId == b.message.fromId)
+    check("out", acrossSenders || a.message.out == b.message.out)
     check("service", a.message.isServiceMessage == b.message.isServiceMessage)
-    check("replyid", a.message.repliedToMessageId == b.message.repliedToMessageId)
-    check("fwd", a.message.hasForwardHeader == b.message.hasForwardHeader)
-    check("media", a.file?.id == b.file?.id && a.photoInfo?.id == b.photoInfo?.id
-      && a.videoInfo?.id == b.videoInfo?.id && a.documentInfo?.id == b.documentInfo?.id)
-    check("reactions", a.reactions == b.reactions || a.id == b.id)
-    check("replied", a.repliedToMessage?.id == b.repliedToMessage?.id)
+    check("replyid", a.message.repliedToMessageId == b.message.repliedToMessageId || fillsReplyPreview(b))
+    check("media", keepsOrDropsMedia(from: a, to: b))
+    check("replied", a.repliedToMessage?.id == b.repliedToMessage?.id || fillsReplyPreview(b))
     check("typo", ap.typographyRevision == bp.typographyRevision)
-    check("gfirst", ap.firstInGroup == bp.firstInGroup)
-    check("glast", ap.lastInGroup == bp.lastInGroup)
-    check("gday", ap.renderStyle == .bubble || ap.startsAfterDaySeparator == bp.startsAfterDaySeparator)
-    check("gedge", ap.isLastMessage == bp.isLastMessage && ap.isFirstMessage == bp.isFirstMessage)
+    let anyGroupPosition = acrossSenders || (bp.renderStyle == .bubble && !b.message.isServiceMessage)
+    check("gfirst", anyGroupPosition || ap.firstInGroup == bp.firstInGroup)
+    check("glast", anyGroupPosition || ap.lastInGroup == bp.lastInGroup)
+    check("gday", anyGroupPosition || ap.renderStyle == .bubble || ap.startsAfterDaySeparator == bp.startsAfterDaySeparator)
+    check("gedge", anyGroupPosition || (ap.isLastMessage == bp.isLastMessage && ap.isFirstMessage == bp.isFirstMessage))
     check("pother", ap.isRtl == bp.isRtl && ap.isDM == bp.isDM && ap.renderStyle == bp.renderStyle
       && ap.interactionMode == bp.interactionMode && ap.replyThreadTitle == bp.replyThreadTitle
       && ap.usesAvatarOverlay == bp.usesAvatarOverlay
       && ap.richBlockCodePresentation == bp.richBlockCodePresentation && ap.translated == bp.translated
       && ap.album == bp.album)
-    check("shname", al.hasName == bl.hasName)
-    check("shavatar", al.hasAvatar == bl.hasAvatar)
-    check("shreply", al.hasReply == bl.hasReply)
-    check("shtext", al.hasText == bl.hasText)
-    check("shmedia", al.hasPhoto == bl.hasPhoto && al.hasVideo == bl.hasVideo && al.hasDocument == bl.hasDocument)
-    check("shreactions", al.hasReactions == bl.hasReactions && al.reactionsOutsideBubble == bl.reactionsOutsideBubble)
-    check("shtime", al.hasTime == bl.hasTime && al.timeInContentFlow == bl.timeInContentFlow
-      && al.placesTimeAboveReactions == bl.placesTimeAboveReactions)
+    check("shmedia", (al.hasPhoto == bl.hasPhoto || !bl.hasPhoto) && (al.hasVideo == bl.hasVideo || !bl.hasVideo)
+      && (al.hasDocument == bl.hasDocument || !bl.hasDocument))
     check("shattach", al.hasAttachments == bl.hasAttachments
       && al.attachmentItems.map(\.size.height) == bl.attachmentItems.map(\.size.height))
-    check("shother", al.hasReplyThreadSummary == bl.hasReplyThreadSummary
-      && al.hasForwardHeader == bl.hasForwardHeader && al.hasActionsRows == bl.hasActionsRows
-      && al.hasAcknowledgement == bl.hasAcknowledgement)
+    check("shother", al.hasReplyThreadSummary == bl.hasReplyThreadSummary && al.hasActionsRows == bl.hasActionsRows)
     if r.isEmpty { r.append("constraintshape") }
     return r.joined(separator: "_")
   }
@@ -379,14 +403,12 @@ class MessageTableCell: NSView {
     guard let messageView else { return }
 
     messageView.updateTextAndSize(fullMessage: content.0, props: content.1, animate: animate)
-    needsDisplay = true
   }
 
   func updateSizeWithProps(props: MessageViewProps) {
     guard let messageView else { return }
     currentContent?.props = props
     messageView.updateSize(props: props)
-    needsDisplay = true
   }
 
   func updateSize() {
@@ -394,7 +416,6 @@ class MessageTableCell: NSView {
     guard let messageView else { return }
 
     messageView.updateSize(props: content.1)
-    needsDisplay = true
   }
 
   private func updateContent() {
@@ -425,22 +446,46 @@ class MessageTableCell: NSView {
 
     newMessageView.setAvatarSwipeProvider(avatarSwipeProvider)
 
-    newMessageView.translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (`layoutMessageView`): rows run no constraints.
+    newMessageView.translatesAutoresizingMaskIntoConstraints = true
     addSubview(newMessageView)
-
-    let trailing = newMessageView.trailingAnchor.constraint(
-      equalTo: trailingAnchor, constant: forwardSelectionActive ? -Self.forwardSelectionInset : 0
-    )
-    messageTrailingConstraint = trailing
-    NSLayoutConstraint.activate([
-      newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      trailing,
-      newMessageView.topAnchor.constraint(equalTo: topAnchor),
-      newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
     messageView = newMessageView
-    needsDisplay = true
+    layoutMessageView()
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    let changed = newSize != frame.size
+    super.setFrameSize(newSize)
+    if changed { needsLayout = true }
+  }
+
+  /// The message fills the row, less the selection checkbox's column on the trailing side.
+  private func layoutMessageView() {
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
+    guard let messageView else {
+      layoutCheckmark(mirrored: mirrored)
+      return
+    }
+    let inset = forwardSelectionActive ? Self.forwardSelectionInset : 0
+    let frame = NSRect(
+      x: mirrored ? inset : 0,
+      y: 0,
+      width: max(0, bounds.width - inset),
+      height: bounds.height
+    )
+    if messageView.frame != frame { messageView.frame = frame }
+    layoutCheckmark(mirrored: mirrored)
+  }
+
+  private func layoutCheckmark(mirrored: Bool) {
+    guard let checkmark = forwardSelectionCheckmark else { return }
+    let size = ForwardMessageSelectionCheckmark.size
+    let centerX = mirrored
+      ? Self.forwardSelectionCheckmarkCenterInset
+      : bounds.width - Self.forwardSelectionCheckmarkCenterInset
+    let alignmentRect = NSRect(x: centerX - size / 2, y: (bounds.height - size) / 2, width: size, height: size)
+    let frame = backingAlignedRect(checkmark.frame(forAlignmentRect: alignmentRect), options: .alignAllEdgesNearest)
+    if checkmark.frame != frame { checkmark.frame = frame }
   }
 
   func reflectBoundsChange(fraction: CGFloat) {
@@ -569,6 +614,7 @@ class MessageTableCell: NSView {
 
   override func layout() {
     super.layout()
+    layoutMessageView()
     replyThreadSourceLayer?.frame = bounds
   }
 

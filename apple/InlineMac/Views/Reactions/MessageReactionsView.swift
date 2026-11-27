@@ -7,6 +7,9 @@ final class MessageReactionsView: NSView {
 
   private var chipsByEmoji: [String: ReactionChipButton] = [:]
   private var groupsByEmoji: [String: GroupedReaction] = [:]
+  /// Chips no emoji uses right now, hidden in place for the next one (a reused row showing another message).
+  private var spareChips: [ReactionChipButton] = []
+  private static let spareChipLimit = 8
 
   private var fullMessage: FullMessage?
   private var currentUserId: Int64? {
@@ -34,7 +37,7 @@ final class MessageReactionsView: NSView {
   func interactiveHitTest(_ point: NSPoint) -> NSView? {
     guard !isHidden, alphaValue > 0.01 else { return nil }
 
-    for case let chip as ReactionChipButton in subviews.reversed() {
+    for case let chip as ReactionChipButton in subviews.reversed() where !chip.isHidden {
       let pointInChip = chip.convert(point, from: self)
       if let hit = chip.hitTest(pointInChip) {
         return hit
@@ -66,7 +69,7 @@ final class MessageReactionsView: NSView {
       if animate {
         animateRemove(chip)
       } else {
-        chip.removeFromSuperview()
+        park(chip)
       }
     }
 
@@ -112,7 +115,7 @@ final class MessageReactionsView: NSView {
           }
         }
       } else {
-        let chip = makeChip(emoji: emoji)
+        let chip = takeSpareChip(emoji: emoji) ?? makeChip(emoji: emoji)
         chip.frame = targetFrame
         configure(
           chip: chip,
@@ -122,7 +125,7 @@ final class MessageReactionsView: NSView {
           transparentOutgoingStyle: transparentOutgoingStyle,
           neutralStyle: neutralStyle
         )
-        addSubview(chip)
+        if chip.superview !== self { addSubview(chip) }
         chipsByEmoji[emoji] = chip
         if animate {
           animateInsert(chip)
@@ -138,10 +141,27 @@ final class MessageReactionsView: NSView {
     chip.wantsLayer = true
     chip.alphaValue = 1.0
 
-    chip.contextMenuProvider = { [weak self] in
-      self?.menu(forEmoji: emoji)
+    chip.contextMenuProvider = { [weak self, weak chip] in
+      guard let chip else { return nil }
+      return self?.menu(forEmoji: chip.emoji)
     }
 
+    return chip
+  }
+
+  private func park(_ chip: ReactionChipButton) {
+    guard spareChips.count < Self.spareChipLimit else {
+      chip.removeFromSuperview()
+      return
+    }
+    chip.isHidden = true
+    spareChips.append(chip)
+  }
+
+  private func takeSpareChip(emoji: String) -> ReactionChipButton? {
+    guard let chip = spareChips.popLast() else { return nil }
+    chip.setEmoji(emoji)
+    chip.isHidden = false
     return chip
   }
 

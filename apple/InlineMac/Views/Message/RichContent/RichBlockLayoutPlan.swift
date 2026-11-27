@@ -223,6 +223,8 @@ struct RichBlockLayoutPlan: Codable, Hashable {
   /// Message actions that blocks drawn in this plan show as their own buttons, or replaced
   /// with a decision. The rows under the message leave them out.
   var claimedActionIDs: Set<String> = []
+  /// While the message streams (`revealing`): the revealed count at which this plan goes stale. Not coded.
+  var revealLimit: Int? = nil
 
   private enum CodingKeys: String, CodingKey {
     case size, mathSignature, contentHorizontalInset, nodes, trailingTextLine, claimedActionIDs
@@ -234,11 +236,12 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     lhs.size == rhs.size && lhs.mathSignature == rhs.mathSignature
       && lhs.contentHorizontalInset == rhs.contentHorizontalInset
       && lhs.nodes == rhs.nodes && lhs.trailingTextLine == rhs.trailingTextLine
-      && lhs.claimedActionIDs == rhs.claimedActionIDs
+      && lhs.claimedActionIDs == rhs.claimedActionIDs && lhs.revealLimit == rhs.revealLimit
   }
 
   func hash(into hasher: inout Hasher) {
     hasher.combine(size); hasher.combine(mathSignature); hasher.combine(contentHorizontalInset)
     hasher.combine(nodes); hasher.combine(trailingTextLine); hasher.combine(claimedActionIDs)
+    hasher.combine(revealLimit)
   }
 }

@@ -3,11 +3,9 @@ import Foundation
 import InlineKit
 import Logger
 
-class MessageAttachmentsView: NSStackView {
-  private struct ItemConstraints {
-    var width: NSLayoutConstraint
-    var height: NSLayoutConstraint
-  }
+/// The attachments under a message, top to bottom at the plan's sizes and spacing, leading-aligned. Laid out by
+/// frame (it was a stack view: its items' constraints pulled message rows into the window's layout engine).
+class MessageAttachmentsView: NSView {
 
   // MARK: - Properties
 
@@ -20,7 +18,9 @@ class MessageAttachmentsView: NSStackView {
 
   /// Track attachment views by id
   var attachmentViews: [Int64: AttachmentView] = [:]
-  private var itemConstraints: [Int64: ItemConstraints] = [:]
+  /// The item views in order, and their sizes from the plan.
+  private(set) var arrangedSubviews: [NSView] = []
+  private var itemSizes: [Int64: NSSize] = [:]
 
   // MARK: - Lifecycle
 
@@ -56,11 +56,40 @@ class MessageAttachmentsView: NSStackView {
   // MARK: - Methods
 
   private func setup() {
-    orientation = .vertical
-    translatesAutoresizingMaskIntoConstraints = false
-    spacing = Theme.messageAttachmentsSpacing
-    edgeInsets = .zero
-    alignment = .leading
+    // Placed by frame (message rows' `layoutParts`).
+    translatesAutoresizingMaskIntoConstraints = true
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    let changed = newSize != frame.size
+    super.setFrameSize(newSize)
+    if changed { needsLayout = true }
+  }
+
+  override func layout() {
+    super.layout()
+    layoutItems()
+  }
+
+  /// Items top to bottom, `Theme.messageAttachmentsSpacing` apart, at the leading edge.
+  private func layoutItems() {
+    let size = bounds.size
+    let mirrored = userInterfaceLayoutDirection == .rightToLeft
+    var top: CGFloat = 0
+    for (index, attachment) in attachments.enumerated() {
+      guard let view = attachmentViews[attachment.id] else { continue }
+      if index > 0 { top += Theme.messageAttachmentsSpacing }
+      let itemSize = itemSizes[attachment.id] ?? view.frame.size
+      let rect = NSRect(
+        x: mirrored ? size.width - itemSize.width : 0,
+        y: isFlipped ? top : size.height - top - itemSize.height,
+        width: itemSize.width,
+        height: itemSize.height
+      )
+      let frame = backingAlignedRect(rect, options: .alignAllEdgesNearest)
+      if view.frame != frame { view.frame = frame }
+      top += itemSize.height
+    }
   }
 
   func configure(
@@ -123,8 +152,11 @@ class MessageAttachmentsView: NSStackView {
       return
     }
 
-    addArrangedSubview(attachmentView)
+    attachmentView.translatesAutoresizingMaskIntoConstraints = true
+    addSubview(attachmentView)
+    arrangedSubviews.append(attachmentView)
     attachmentViews[attachment.id] = attachmentView
+    needsLayout = true
   }
 
   func apply(itemPlans: [MessageSizeCalculator.LayoutPlan]) {
@@ -162,21 +194,10 @@ class MessageAttachmentsView: NSStackView {
     interactiveHitTest(point)
   }
 
-  private func apply(size: NSSize, to view: AttachmentView, id: Int64) {
-    if let constraints = itemConstraints[id] {
-      if constraints.width.constant != size.width {
-        constraints.width.constant = size.width
-      }
-      if constraints.height.constant != size.height {
-        constraints.height.constant = size.height
-      }
-      return
-    }
-
-    let width = view.widthAnchor.constraint(equalToConstant: size.width)
-    let height = view.heightAnchor.constraint(equalToConstant: size.height)
-    NSLayoutConstraint.activate([width, height])
-    itemConstraints[id] = ItemConstraints(width: width, height: height)
+  private func apply(size: NSSize, to _: AttachmentView, id: Int64) {
+    guard itemSizes[id] != size else { return }
+    itemSizes[id] = size
+    needsLayout = true
   }
 
   private func updateExistingViews(with next: [FullAttachment], message: Message) -> Bool {
@@ -212,15 +233,13 @@ class MessageAttachmentsView: NSStackView {
   }
 
   private func attachmentsViewCleanup() {
-    let constraints = itemConstraints.values.flatMap { [$0.width, $0.height] }
-    NSLayoutConstraint.deactivate(constraints)
-    itemConstraints.removeAll()
-
+    itemSizes.removeAll()
     for view in arrangedSubviews {
-      removeArrangedSubview(view)
       view.removeFromSuperview()
     }
+    arrangedSubviews.removeAll()
     attachmentViews.removeAll()
+    needsLayout = true
   }
 
   // MARK: - Computed

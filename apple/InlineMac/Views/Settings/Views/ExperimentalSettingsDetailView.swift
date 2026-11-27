@@ -88,6 +88,13 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.coreTextMessageText)
+      Toggle(isOn: $settings.timelineMessageListEnabled) {
+        SettingsRowLabel(
+          .timelineMessageList,
+          description: "A rewritten message list: trackpad scrolling that matches the system, no jumps when history loads, agent replies that grow a line at a time, and messages, composer and list moving in one animation."
+        )
+      }
+      .settingsSearchAnchor(.timelineMessageList)
     } header: {
       SettingsSectionHeader("Messages")
     }

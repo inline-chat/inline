@@ -12,7 +12,6 @@ final class NewPhotoView: NSView {
   private let imageView: NSView = {
     let view = NSView()
     view.wantsLayer = true
-    view.translatesAutoresizingMaskIntoConstraints = false
 
     // Set a clear background initially
     view.layer?.backgroundColor = NSColor.clear.cgColor
@@ -35,13 +34,13 @@ final class NewPhotoView: NSView {
     view.wantsLayer = true
     view.layer?.masksToBounds = true
     view.backgroundColor = .gray.withAlphaComponent(0.05)
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
   private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
     let view = InlineTinyThumbnailBackgroundView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // It opts into constraints by default; here it is placed by frame (`layoutParts`).
+    view.translatesAutoresizingMaskIntoConstraints = true
     return view
   }()
 
@@ -90,25 +89,10 @@ final class NewPhotoView: NSView {
 
     translatesAutoresizingMaskIntoConstraints = false
 
+    // Placed by frame (`layoutParts`): full height, past the leading and trailing edges by the bubble bleed.
     addSubview(tinyThumbnailBackgroundView)
     addSubview(backgroundView)
-    bleedLeadingConstraints = [
-      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-    ]
-    bleedTrailingConstraints = [
-      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-    ]
-    NSLayoutConstraint.activate(bleedLeadingConstraints + bleedTrailingConstraints + [
-      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
-      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
-    NSLayoutConstraint.activate([
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
+    layoutParts()
     tinyThumbnailBackgroundView.onVisibilityChange = { [weak self] isVisible in
       guard let self, currentImage == nil else { return }
       backgroundView.isHidden = isVisible
@@ -124,8 +108,6 @@ final class NewPhotoView: NSView {
     showLoadingView()
   }
 
-  private var imageConstraints: [NSLayoutConstraint] = []
-
   private func addImageView() {
     guard !haveAddedImageView else { return }
     haveAddedImageView = true
@@ -133,21 +115,7 @@ final class NewPhotoView: NSView {
 
     // Add the image layer to the image view
     imageView.layer?.addSublayer(imageLayer)
-
-    // Remove existing constraints array if needed
-    NSLayoutConstraint.deactivate(imageConstraints)
-    let imageLeading = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
-    let imageTrailing = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
-    bleedLeadingConstraints.append(imageLeading)
-    bleedTrailingConstraints.append(imageTrailing)
-    imageConstraints = [
-      imageLeading,
-      imageTrailing,
-      imageView.topAnchor.constraint(equalTo: topAnchor),
-      imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ]
-    NSLayoutConstraint.activate(imageConstraints)
-    applyBubbleBleedInsets()
+    layoutParts()
   }
 
   /// Set when this photo reaches the bubble's bottom edge: the image continues past the view's
@@ -157,20 +125,22 @@ final class NewPhotoView: NSView {
       guard bubbleBleed != oldValue else { return }
       // A rasterized layer would cut the image off at the view's bounds.
       layer?.shouldRasterize = bubbleBleed == nil
-      applyBubbleBleedInsets()
+      layoutParts()
       updateMasks()
     }
   }
 
-  private var bleedLeadingConstraints: [NSLayoutConstraint] = []
-  private var bleedTrailingConstraints: [NSLayoutConstraint] = []
-
-  private func applyBubbleBleedInsets() {
-    for constraint in bleedLeadingConstraints {
-      constraint.constant = -(bubbleBleed?.leadingBleed ?? 0)
-    }
-    for constraint in bleedTrailingConstraints {
-      constraint.constant = bubbleBleed?.trailingBleed ?? 0
+  /// The image, its placeholder and the tiny thumbnail: full height, and past the leading and trailing edges by the
+  /// bubble bleed (mirrored in right-to-left, as their leading and trailing constraints were).
+  private func layoutParts() {
+    let leadingBleed = bubbleBleed?.leadingBleed ?? 0
+    let trailingBleed = bubbleBleed?.trailingBleed ?? 0
+    let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+    let left = rightToLeft ? trailingBleed : leadingBleed
+    let right = rightToLeft ? leadingBleed : trailingBleed
+    let frame = NSRect(x: -left, y: 0, width: bounds.width + left + right, height: bounds.height)
+    for view in [tinyThumbnailBackgroundView, backgroundView, imageView] where view.frame != frame {
+      view.frame = frame
     }
   }
 
@@ -374,13 +344,16 @@ final class NewPhotoView: NSView {
 
   override func layout() {
     super.layout()
+    layoutParts()
     updateMasks()
     updateImageLayerFrame()
   }
 
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
+    layoutParts()
     updateMasks()
+    updateImageLayerFrame()
   }
 
   override func viewDidChangeBackingProperties() {

@@ -166,7 +166,9 @@ class DocumentView: NSView {
 
   private lazy var thumbnailView: PlatformPhotoView = {
     let view = PlatformPhotoView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // Fills its container by autoresizing (the container is placed by frame).
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.autoresizingMask = [.width, .height]
     view.photoContentMode = .aspectFit
     view.showsTinyThumbnailBackground = true
     view.showsLoadingPlaceholder = true
@@ -357,13 +359,8 @@ class DocumentView: NSView {
     iconContainer.addSubview(uploadProgressRing)
     iconContainer.addSubview(uploadCancelButton)
     iconContainer.addSubview(cancelIcon)
+    thumbnailView.frame = thumbnailContainerView.bounds
     thumbnailContainerView.addSubview(thumbnailView)
-    NSLayoutConstraint.activate([
-      thumbnailView.leadingAnchor.constraint(equalTo: thumbnailContainerView.leadingAnchor),
-      thumbnailView.trailingAnchor.constraint(equalTo: thumbnailContainerView.trailingAnchor),
-      thumbnailView.topAnchor.constraint(equalTo: thumbnailContainerView.topAnchor),
-      thumbnailView.bottomAnchor.constraint(equalTo: thumbnailContainerView.bottomAnchor),
-    ])
     addSubview(thumbnailContainerView)
     addSubview(iconContainer)
     addSubview(fileNameLabel)

@@ -58,9 +58,8 @@ class MessageListAppKit: NSViewController {
   private var messageSelection = MessageSelectionState()
   private var showsForwardSelection = false
   var messageSelectionInset: CGFloat?
-  var messageSelectionTableView: NSTableView {
-    tableView
-  }
+  var messageSelectionRows: any MessageListRowGeometry { tableRowGeometry }
+  private lazy var tableRowGeometry = TableRowGeometry(table: tableView)
 
   func canSelectMessage(atRow row: Int) -> Bool {
     selectableStableId(forRow: row) != nil
@@ -3034,10 +3033,12 @@ class MessageListAppKit: NSViewController {
     log.debug("reading place saved message=\(place.messageId) offset=\(place.offset)")
   }
 
-  /// No newer message is cached past the window, and the last message row starts above the
-  /// composer. A chat left a few lines up still opens at the bottom.
+  /// The window reaches the chat's live end, and the last message row starts above the
+  /// composer. A chat left a few lines up still opens at the bottom. The window's newest row alone
+  /// is not enough: past a jump's window, or at the edge of history paged in, newer history is
+  /// still unknown and the place is kept, as Telegram keeps it.
   private func isNewestMessageOnScreen(visibleBottom: CGFloat) -> Bool {
-    guard !chatRows.canLoadNewerFromLocal else { return false }
+    guard chatRows.historyCoverage.isAtCertifiedLiveEnd else { return false }
     guard let lastMessageRow = chatRows.rows.lastIndex(where: {
       if case .message = $0 { return true }
       return false
@@ -5462,7 +5463,7 @@ private extension MessagesProgressiveViewModel.MessagesChangeSet {
 // MARK: - Text selection across blocks and messages
 
 extension MessageListAppKit: MessageListTextSelectionHost {
-  var textSelectionTableView: NSTableView { tableView }
+  var textSelectionRows: any MessageListRowGeometry { tableRowGeometry }
   var textSelectionRootView: NSView { view }
 
   func textSelectionStableId(atRow row: Int) -> Int64? {

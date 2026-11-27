@@ -156,6 +156,7 @@ final class AppSettings: ObservableObject {
   static let messageWidgetsEnabledKey = "experimental.messageWidgetsEnabled"
   static let stableChatRouteEnabledKey = "experimental.stableChatRouteEnabled"
   static let coreTextMessageTextEnabledKey = CoreTextMessageText.defaultsKey
+  static let timelineMessageListEnabledKey = "experimental.macTimelineList"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -553,6 +554,14 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  /// The new message list (TimelineAppKit): no table view, rows placed around the reading row, every change
+  /// in one transaction. Read when a chat opens. Off until it reaches parity with the table list.
+  @Published var timelineMessageListEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(timelineMessageListEnabled, forKey: Self.timelineMessageListEnabledKey)
+    }
+  }
+
   @Published var richTextInlineMathEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
@@ -647,6 +656,8 @@ final class AppSettings: ObservableObject {
     messageWidgetsEnabled = UserDefaults.standard.object(forKey: Self.messageWidgetsEnabledKey) as? Bool ?? false
     stableChatRouteEnabled = UserDefaults.standard.object(forKey: Self.stableChatRouteEnabledKey) as? Bool ?? false
     coreTextMessageTextEnabled = UserDefaults.standard.object(forKey: Self.coreTextMessageTextEnabledKey) as? Bool ?? false
+    // `bool(forKey:)` also reads a launch argument (`-experimental.macTimelineList YES`), which arrives as a string.
+    timelineMessageListEnabled = UserDefaults.standard.bool(forKey: Self.timelineMessageListEnabledKey)
     richTextInlineMathEnabled = UserDefaults.standard.object(
       forKey: Self.richTextInlineMathEnabledKey
     ) as? Bool ?? false

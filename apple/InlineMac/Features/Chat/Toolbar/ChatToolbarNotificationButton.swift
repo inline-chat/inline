@@ -328,8 +328,9 @@ private final class ChatToolbarNotificationModel: ObservableObject {
       .tracking { db in
         try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer))
       }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .receive(on: DispatchQueue.main)
+      // Fetched on a reader, delivered on the main queue (the hop to main already deferred the value; `.immediate`
+      // only made the main thread fetch it, and wait for a reader, at each chat open).
+      .publisher(in: db.dbWriter, scheduling: .async(onQueue: .main))
       .sink(
         receiveCompletion: { _ in },
         receiveValue: { [weak self] dialog in

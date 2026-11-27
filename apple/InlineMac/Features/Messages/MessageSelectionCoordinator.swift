@@ -57,6 +57,12 @@ final class MessageSelectionCoordinator {
       }
       ancestor = current.superview
     }
+    // The timeline list: its rows are not a table; the list's text selection knows which list holds the view.
+    if let host = MessageListTextSelection.owner(of: source)?.host,
+       let row = host.textSelectionRows.row(containing: source)
+    {
+      host.beginMessageSelection(atRow: row)
+    }
   }
 
   private func refresh() {
@@ -70,7 +76,7 @@ final class MessageSelectionCoordinator {
       isShowingSelection = active
       if active {
         previousFirstResponder = compose.window?.firstResponder as? NSView
-        compose.window?.makeFirstResponder(list.messageSelectionTableView)
+        compose.window?.makeFirstResponder(list.messageSelectionRows.keyView)
         installMonitor()
       } else {
         keyboardSelectionRow = nil
@@ -152,7 +158,7 @@ final class MessageSelectionCoordinator {
     guard let list, list.isMessageSelectionActive, let window = list.view.window,
           event.window === window, window.attachedSheet == nil,
           !list.view.isHiddenOrHasHiddenAncestor else { return event }
-    let table = list.messageSelectionTableView
+    let rows = list.messageSelectionRows
     // A drag owns the mouse until release, even outside the list, so it can autoscroll.
     if drag != nil, event.type == .leftMouseDragged || event.type == .leftMouseUp {
       if event.type == .leftMouseUp { endDrag() } else { continueDrag(at: event.locationInWindow) }
@@ -160,13 +166,9 @@ final class MessageSelectionCoordinator {
     }
     if event.type == .leftMouseDragged || event.type == .leftMouseUp { return event }
     if event.type != .keyDown {
-      guard let scrollView = table.enclosingScrollView,
-            scrollView.bounds.contains(scrollView.convert(event.locationInWindow, from: nil)),
-            let hit = scrollView.hitTest(scrollView.superview?.convert(event.locationInWindow, from: nil)
-              ?? event.locationInWindow),
-            hit === table || hit.isDescendant(of: table) else { return event }
+      guard rows.hit(atWindowPoint: event.locationInWindow) != nil else { return event }
       guard event.type == .leftMouseDown, !isDeleting else { return nil }
-      let row = table.row(at: table.convert(event.locationInWindow, from: nil))
+      let row = rows.row(at: rows.rowsView.convert(event.locationInWindow, from: nil)) ?? -1
       keyboardSelectionRow = row
       if event.modifierFlags.contains(.shift) {
         list.extendMessageSelection(toRow: row)
@@ -179,11 +181,11 @@ final class MessageSelectionCoordinator {
           baseline: list.selectedMessageStableIds
         )
       }
-      if list.isMessageSelectionActive { window.makeFirstResponder(table) }
+      if list.isMessageSelectionActive { window.makeFirstResponder(rows.keyView) }
       return nil
     }
     guard let responder = window.firstResponder as? NSView,
-          responder === table || responder.isDescendant(of: table) || responder.isDescendant(of: bar)
+          rows.ownsResponder(responder) || responder.isDescendant(of: bar)
     else { return event }
     guard !isDeleting else { return nil }
     let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
@@ -201,14 +203,16 @@ final class MessageSelectionCoordinator {
       if event.keyCode == 51 || event.keyCode == 117 { confirmDelete(); return nil }
     }
     if modifiers.isEmpty || modifiers == .shift, event.keyCode == 125 || event.keyCode == 126 {
-      let rows = (0 ..< table.numberOfRows).filter { list.canSelectMessage(atRow: $0) }
-      let selected = rows.filter { list.isMessageSelected(atRow: $0) }
+      let selectable = (0 ..< rows.numberOfRows).filter { list.canSelectMessage(atRow: $0) }
+      let selected = selectable.filter { list.isMessageSelected(atRow: $0) }
       let down = event.keyCode == 125
-      if let edge = keyboardSelectionRow ?? (down ? selected.last : selected.first), let index = rows.firstIndex(of: edge) {
-        let next = rows[min(max(index + (down ? 1 : -1), 0), rows.count - 1)]
+      if let edge = keyboardSelectionRow ?? (down ? selected.last : selected.first),
+         let index = selectable.firstIndex(of: edge)
+      {
+        let next = selectable[min(max(index + (down ? 1 : -1), 0), selectable.count - 1)]
         keyboardSelectionRow = next
         if modifiers == .shift { list.extendMessageSelection(toRow: next) } else { list.beginMessageSelection(atRow: next) }
-        table.scrollRowToVisible(next)
+        rows.scrollRowToVisible(next)
       }
       return nil
     }
@@ -219,16 +223,11 @@ final class MessageSelectionCoordinator {
 
   private func continueDrag(at windowPoint: NSPoint) {
     guard let drag, let list, list.isMessageSelectionActive else { return endDrag() }
-    let table = list.messageSelectionTableView
-    guard table.numberOfRows > 0,
+    let rows = list.messageSelectionRows
+    guard rows.numberOfRows > 0,
           let anchorRow = list.messageSelectionRow(forStableId: drag.anchorStableId) else { return }
-    let point = table.convert(windowPoint, from: nil)
-    var row = table.row(at: NSPoint(x: table.bounds.midX, y: point.y))
-    if row < 0 {
-      // Past either end of the content: clamp to the nearest row. A gap between rows changes nothing.
-      guard point.y < table.bounds.minY || point.y > table.bounds.maxY else { return }
-      row = (point.y < table.bounds.minY) == table.isFlipped ? 0 : table.numberOfRows - 1
-    }
+    // Past either end of the rows: the nearest row. A gap between rows changes nothing.
+    guard let row = rows.clampedRow(at: rows.rowsView.convert(windowPoint, from: nil)) else { return }
     let range = Set((min(anchorRow, row) ... max(anchorRow, row)).compactMap { list.messageSelectionStableId(atRow: $0) })
     list.setSelectedMessageStableIds(drag.selects ? drag.baseline.union(range) : drag.baseline.subtracting(range))
     keyboardSelectionRow = row
@@ -237,8 +236,7 @@ final class MessageSelectionCoordinator {
 
   /// Keeps scrolling while the pointer rests past the top or bottom edge, extending the drag.
   private func updateAutoscroll(windowPoint: NSPoint) {
-    guard drag != nil, let scrollView = list?.messageSelectionTableView.enclosingScrollView else { return }
-    let visible = scrollView.convert(scrollView.bounds, to: nil)
+    guard drag != nil, let visible = list?.messageSelectionRows.autoscrollRegion(insetsOnly: false) else { return }
     let outside = windowPoint.y < visible.minY + 8 || windowPoint.y > visible.maxY - 8
     guard outside else {
       autoscrollTimer?.invalidate()
@@ -253,9 +251,8 @@ final class MessageSelectionCoordinator {
 
   private func autoscrollTick() {
     guard drag != nil, let list, let window = list.view.window,
-          let scrollView = list.messageSelectionTableView.enclosingScrollView else { return endDrag() }
+          let visible = list.messageSelectionRows.autoscrollRegion(insetsOnly: false) else { return endDrag() }
     let point = window.mouseLocationOutsideOfEventStream
-    let visible = scrollView.convert(scrollView.bounds, to: nil)
     let edge: CGFloat = 8
     let distance = point.y < visible.minY + edge ? point.y - (visible.minY + edge)
       : point.y > visible.maxY - edge ? point.y - (visible.maxY - edge) : 0
@@ -266,14 +263,7 @@ final class MessageSelectionCoordinator {
     }
     // Faster the further past the edge, like Telegram and Finder.
     let step = min(max(abs(distance) * 0.6, 6), 40) * (distance > 0 ? 1 : -1)
-    let clip = scrollView.contentView
-    var proposed = clip.bounds
-    proposed.origin.y += clip.isFlipped ? -step : step
-    // The clip view knows the list's content insets; let it clamp to the scrollable range.
-    let origin = clip.constrainBoundsRect(proposed).origin
-    guard origin.y != clip.bounds.origin.y else { return }
-    clip.scroll(to: origin)
-    scrollView.reflectScrolledClipView(clip)
+    guard list.messageSelectionRows.autoscroll(by: step) else { return }
     continueDrag(at: point)
   }
 

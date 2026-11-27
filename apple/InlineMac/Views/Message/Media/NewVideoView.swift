@@ -96,7 +96,8 @@ final class CircularTransferRingView: NSView {
     displayedProgress = configuration.minVisibleProgress
     super.init(frame: .zero)
     wantsLayer = true
-    translatesAutoresizingMaskIntoConstraints = false
+    // Placed by frame (the video overlay's and the document view's layout).
+    translatesAutoresizingMaskIntoConstraints = true
     layer?.addSublayer(progressLayer)
 
     progressLayer.fillColor = NSColor.clear.cgColor
@@ -196,7 +197,6 @@ private final class VideoOverlayView: NSView {
     button.bezelStyle = .shadowlessSquare
     button.isBordered = false
     button.imagePosition = .imageOnly
-    button.translatesAutoresizingMaskIntoConstraints = false
     let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
     button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Cancel")?
       .withSymbolConfiguration(config)
@@ -212,7 +212,6 @@ private final class VideoOverlayView: NSView {
     view.wantsLayer = true
     view.layer?.cornerRadius = 24
     view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.5).cgColor
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -222,7 +221,6 @@ private final class VideoOverlayView: NSView {
       .withSymbolConfiguration(config)
     let iv = NSImageView(image: image ?? NSImage())
     iv.contentTintColor = .white
-    iv.translatesAutoresizingMaskIntoConstraints = false
     return iv
   }()
 
@@ -232,7 +230,6 @@ private final class VideoOverlayView: NSView {
       .withSymbolConfiguration(config)
     let iv = NSImageView(image: image ?? NSImage())
     iv.contentTintColor = .white
-    iv.translatesAutoresizingMaskIntoConstraints = false
     return iv
   }()
 
@@ -243,7 +240,6 @@ private final class VideoOverlayView: NSView {
   init(viewModel: VideoOverlayViewModel, onCancel: @escaping () -> Void) {
     self.onCancel = onCancel
     super.init(frame: .zero)
-    translatesAutoresizingMaskIntoConstraints = false
 
     addSubview(backgroundCircle)
     addSubview(playIcon)
@@ -253,29 +249,6 @@ private final class VideoOverlayView: NSView {
     progressRing.isHidden = true
     cancelButton.target = self
     cancelButton.action = #selector(handleCancel)
-
-    NSLayoutConstraint.activate([
-      backgroundCircle.centerXAnchor.constraint(equalTo: centerXAnchor),
-      backgroundCircle.centerYAnchor.constraint(equalTo: centerYAnchor),
-      backgroundCircle.widthAnchor.constraint(equalToConstant: 48),
-      backgroundCircle.heightAnchor.constraint(equalToConstant: 48),
-
-      playIcon.centerXAnchor.constraint(equalTo: centerXAnchor),
-      playIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-      downloadIcon.centerXAnchor.constraint(equalTo: centerXAnchor),
-      downloadIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-      progressRing.centerXAnchor.constraint(equalTo: centerXAnchor),
-      progressRing.centerYAnchor.constraint(equalTo: centerYAnchor),
-      progressRing.widthAnchor.constraint(equalToConstant: 44),
-      progressRing.heightAnchor.constraint(equalToConstant: 44),
-
-      cancelButton.centerXAnchor.constraint(equalTo: centerXAnchor),
-      cancelButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-      cancelButton.widthAnchor.constraint(equalToConstant: 24),
-      cancelButton.heightAnchor.constraint(equalToConstant: 24),
-    ])
 
     cancellable = viewModel.$state
       .receive(on: DispatchQueue.main)
@@ -321,6 +294,28 @@ private final class VideoOverlayView: NSView {
   @objc private func handleCancel() {
     onCancel()
   }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    let changed = newSize != frame.size
+    super.setFrameSize(newSize)
+    if changed { needsLayout = true }
+  }
+
+  /// Everything centered: the 48 pt circle, the play or download icon at its own size, the 44 pt ring and the
+  /// 24 pt cancel button.
+  override func layout() {
+    super.layout()
+    func center(_ view: NSView, _ size: NSSize) {
+      let rect = NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height)
+      let frame = backingAlignedRect(view.frame(forAlignmentRect: rect), options: .alignAllEdgesNearest)
+      if view.frame != frame { view.frame = frame }
+    }
+    center(backgroundCircle, NSSize(width: 48, height: 48))
+    center(playIcon, playIcon.intrinsicContentSize)
+    center(downloadIcon, downloadIcon.intrinsicContentSize)
+    center(progressRing, NSSize(width: 44, height: 44))
+    center(cancelButton, NSSize(width: 24, height: 24))
+  }
 }
 
 private final class InlineAnimatedVideoPlayerView: NSView {
@@ -331,7 +326,6 @@ private final class InlineAnimatedVideoPlayerView: NSView {
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-    translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
     layer?.masksToBounds = true
     playerLayer.videoGravity = .resizeAspectFill
@@ -419,7 +413,6 @@ final class NewVideoView: NSView {
   private let imageView: NSView = {
     let view = NSView()
     view.wantsLayer = true
-    view.translatesAutoresizingMaskIntoConstraints = false
     view.layer?.backgroundColor = NSColor.clear.cgColor
     return view
   }()
@@ -437,13 +430,13 @@ final class NewVideoView: NSView {
     view.wantsLayer = true
     view.layer?.masksToBounds = true
     view.backgroundColor = .black.withAlphaComponent(0.1)
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
   private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
     let view = InlineTinyThumbnailBackgroundView()
-    view.translatesAutoresizingMaskIntoConstraints = false
+    // It opts into constraints by default; here it is placed by frame (`layoutParts`).
+    view.translatesAutoresizingMaskIntoConstraints = true
     return view
   }()
 
@@ -495,7 +488,6 @@ final class NewVideoView: NSView {
     view.layer?.cornerRadius = 10
     view.layer?.cornerCurve = .continuous
     view.layer?.masksToBounds = true
-    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -507,7 +499,6 @@ final class NewVideoView: NSView {
     label.isEditable = false
     label.isSelectable = false
     label.alignment = .center
-    label.translatesAutoresizingMaskIntoConstraints = false
     label.lineBreakMode = .byClipping
     return label
   }()
@@ -578,59 +569,18 @@ final class NewVideoView: NSView {
     layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
     translatesAutoresizingMaskIntoConstraints = false
 
+    // Placed by frame (`layoutParts`).
     addSubview(tinyThumbnailBackgroundView)
     addSubview(backgroundView)
-    bleedLeadingConstraints = [
-      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-    ]
-    bleedTrailingConstraints = [
-      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-    ]
-    NSLayoutConstraint.activate([
-      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
-      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
-    NSLayoutConstraint.activate([
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
     tinyThumbnailBackgroundView.onVisibilityChange = { [weak self] isVisible in
       guard let self, currentImage == nil else { return }
       backgroundView.isHidden = isVisible
     }
-
     addSubview(overlayView)
-    NSLayoutConstraint.activate([
-      overlayView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      overlayView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      overlayView.topAnchor.constraint(equalTo: topAnchor),
-      overlayView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
     addSubview(animatedPlayerView, positioned: .below, relativeTo: overlayView)
-    NSLayoutConstraint.activate(bleedLeadingConstraints + bleedTrailingConstraints + [
-      animatedPlayerView.topAnchor.constraint(equalTo: topAnchor),
-      animatedPlayerView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
     addSubview(durationBadgeBackground)
     addSubview(durationBadge)
-    NSLayoutConstraint.activate([
-      durationBadgeBackground.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-      durationBadgeBackground.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-      durationBadgeBackground.heightAnchor.constraint(equalToConstant: 20),
-
-      durationBadge.leadingAnchor.constraint(equalTo: durationBadgeBackground.leadingAnchor, constant: 6),
-      durationBadge.trailingAnchor.constraint(equalTo: durationBadgeBackground.trailingAnchor, constant: -6),
-      durationBadge.centerYAnchor.constraint(equalTo: durationBadgeBackground.centerYAnchor),
-    ])
-    durationBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
-    durationBadge.setContentHuggingPriority(.required, for: .horizontal)
+    layoutParts()
 
     updateTinyThumbnailBackground()
     updateImage()
@@ -647,18 +597,7 @@ final class NewVideoView: NSView {
     haveAddedImageView = true
     addSubview(imageView, positioned: .below, relativeTo: animatedPlayerView)
     imageView.layer?.addSublayer(imageLayer)
-
-    let imageLeading = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
-    let imageTrailing = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
-    bleedLeadingConstraints.append(imageLeading)
-    bleedTrailingConstraints.append(imageTrailing)
-    NSLayoutConstraint.activate([
-      imageLeading,
-      imageTrailing,
-      imageView.topAnchor.constraint(equalTo: topAnchor),
-      imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-    applyBubbleBleedInsets()
+    layoutParts()
   }
 
   /// Set when this video reaches the bubble's bottom edge: the picture continues past the view's
@@ -668,21 +607,42 @@ final class NewVideoView: NSView {
       guard bubbleBleed != oldValue else { return }
       // A rasterized layer would cut the picture off at the view's bounds.
       layer?.shouldRasterize = bubbleBleed == nil
-      applyBubbleBleedInsets()
+      layoutParts()
       updateMasks()
     }
   }
 
-  private var bleedLeadingConstraints: [NSLayoutConstraint] = []
-  private var bleedTrailingConstraints: [NSLayoutConstraint] = []
+  /// The picture layers (thumbnail, placeholder, player, image) full height and past the leading and trailing edges
+  /// by the bubble bleed (mirrored in right-to-left, as their constraints were); the overlay on the view; the duration
+  /// badge 8 pt in from the top leading corner, 20 pt tall, the label 6 pt inside it.
+  private func layoutParts() {
+    let size = bounds.size
+    let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+    let leadingBleed = bubbleBleed?.leadingBleed ?? 0
+    let trailingBleed = bubbleBleed?.trailingBleed ?? 0
+    let left = rightToLeft ? trailingBleed : leadingBleed
+    let right = rightToLeft ? leadingBleed : trailingBleed
+    let bleedFrame = NSRect(x: -left, y: 0, width: size.width + left + right, height: size.height)
+    for view in [tinyThumbnailBackgroundView, backgroundView, animatedPlayerView, imageView] where view.frame != bleedFrame {
+      view.frame = bleedFrame
+    }
+    let overlayFrame = NSRect(origin: .zero, size: size)
+    if overlayView.frame != overlayFrame { overlayView.frame = overlayFrame }
 
-  private func applyBubbleBleedInsets() {
-    for constraint in bleedLeadingConstraints {
-      constraint.constant = -(bubbleBleed?.leadingBleed ?? 0)
-    }
-    for constraint in bleedTrailingConstraints {
-      constraint.constant = bubbleBleed?.trailingBleed ?? 0
-    }
+    let label = durationBadge.intrinsicContentSize
+    let badge = NSRect(
+      x: rightToLeft ? size.width - 8 - (label.width + 12) : 8,
+      y: isFlipped ? 8 : size.height - 8 - 20,
+      width: label.width + 12,
+      height: 20
+    )
+    let badgeFrame = backingAlignedRect(badge, options: .alignAllEdgesNearest)
+    if durationBadgeBackground.frame != badgeFrame { durationBadgeBackground.frame = badgeFrame }
+    let labelRect = NSRect(
+      x: badge.minX + 6, y: badge.midY - label.height / 2, width: label.width, height: label.height
+    )
+    let labelFrame = backingAlignedRect(durationBadge.frame(forAlignmentRect: labelRect), options: .alignAllEdgesNearest)
+    if durationBadge.frame != labelFrame { durationBadge.frame = labelFrame }
   }
 
   // MARK: - Image loading
@@ -1002,6 +962,8 @@ final class NewVideoView: NSView {
       }
       return
     }
+    // The badge's width follows its text (`layoutParts`).
+    defer { needsLayout = true }
 
     if isPendingUpload() {
       durationBadge.isHidden = false
@@ -1376,13 +1338,16 @@ final class NewVideoView: NSView {
 
   override func layout() {
     super.layout()
+    layoutParts()
     updateMasks()
     updateImageLayerFrame()
   }
 
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
+    layoutParts()
     updateMasks()
+    updateImageLayerFrame()
   }
 
   override func viewDidChangeBackingProperties() {

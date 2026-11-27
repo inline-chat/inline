@@ -31,10 +31,23 @@ struct RichBlockPalette {
     self.secondary = secondary
     self.tertiary = tertiary
     self.link = link
-    subtleFill = primary.withAlphaComponent(0.045)
-    codeFill = primary.withAlphaComponent(0.06)
-    separator = primary.withAlphaComponent(0.14)
-    placeholder = primary.withAlphaComponent(0.075)
+    subtleFill = primary.richBlockFaded(0.045)
+    codeFill = primary.richBlockFaded(0.06)
+    separator = primary.richBlockFaded(0.14)
+    placeholder = primary.richBlockFaded(0.075)
+  }
+}
+
+extension NSColor {
+  /// This color at `alpha`, resolved for the appearance it is drawn in. `withAlphaComponent` on a system color
+  /// (`labelColor`) freezes it in the appearance current when it is called, which outside drawing is light: in dark
+  /// mode a code block's language label, copy icon and line numbers stayed black, and the fills nearly vanished.
+  func richBlockFaded(_ alpha: CGFloat) -> NSColor {
+    NSColor(name: nil) { [self] appearance in
+      var resolved: NSColor = self
+      appearance.performAsCurrentDrawingAppearance { resolved = self.usingColorSpace(.deviceRGB) ?? self }
+      return resolved.withAlphaComponent(alpha)
+    }
   }
 }
 

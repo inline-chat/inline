@@ -531,12 +531,15 @@ final class RichBlockLayoutPlanner {
         let text: NSAttributedString
         let width: CGFloat
         let singleLine: Bool
+        /// Measured with the Core Text layout that draws it (`RichBlockLayerText`), not TextKit.
+        let layerText: Bool
         private let textHash: Int
 
-        init(text: NSAttributedString, width: CGFloat, singleLine: Bool) {
+        init(text: NSAttributedString, width: CGFloat, singleLine: Bool, layerText: Bool = false) {
           self.text = text
           self.width = width
           self.singleLine = singleLine
+          self.layerText = layerText
           // Foundation hashes the length and a few characters from the ends
           // and the middle, so this is O(1) and done once per lookup.
           textHash = text.hash
@@ -546,6 +549,7 @@ final class RichBlockLayoutPlanner {
           hasher.combine(textHash)
           hasher.combine(width)
           hasher.combine(singleLine)
+          hasher.combine(layerText)
         }
 
         // Literal comparison of characters and every attribute (fonts,
@@ -554,6 +558,7 @@ final class RichBlockLayoutPlanner {
           lhs.textHash == rhs.textHash
             && lhs.width == rhs.width
             && lhs.singleLine == rhs.singleLine
+            && lhs.layerText == rhs.layerText
             && (lhs.text === rhs.text || lhs.text.isEqual(to: rhs.text))
         }
       }
@@ -572,10 +577,11 @@ final class RichBlockLayoutPlanner {
         for text: NSAttributedString,
         width: CGFloat,
         singleLine: Bool = false,
+        layerText: Bool = false,
         make: () -> Value
       ) -> Value {
         guard width.isFinite else { return make() }
-        let key = Key(text: text, width: width, singleLine: singleLine)
+        let key = Key(text: text, width: width, singleLine: singleLine, layerText: layerText)
         if let value = recent[key] { return value }
         let value = previous.removeValue(forKey: key) ?? make()
         // Text length dominates memory; the constant covers small entries. A key
@@ -1407,7 +1413,9 @@ final class RichBlockLayoutPlanner {
         recordMeasuredFrame(frame)
         height = frame.maxY
       } else {
-        guard appendText(text, role: .paragraph, path: path, x: x, width: width, inheritedDirection: false)
+        guard appendText(
+          text, role: .paragraph, path: path, x: x, width: width, inheritedDirection: false, drawnByTextNode: false
+        )
         else { return false }
         nodes[nodes.count - 1].kind = .math(.init(range: range, imageSize: nil))
       }
@@ -1423,7 +1431,8 @@ final class RichBlockLayoutPlanner {
       width: CGFloat,
       inset: CGFloat = 0,
       inheritedDirection: Bool? = nil,
-      capturesTrailingLine: Bool = false
+      capturesTrailingLine: Bool = false,
+      drawnByTextNode: Bool = true
     ) -> Bool {
       let isRTL = text.hasIsRtl ? text.isRtl : (inheritedDirection ?? false)
       let disclosureActivity: RichBlockActivityKind? = if case let .disclosureSummary(_, _, activity, _) = role {
@@ -1461,7 +1470,13 @@ final class RichBlockLayoutPlanner {
       } else {
         false
       }
-      let measurement = measureText(attributed, width: measuredWidth, singleLine: singleLine)
+      // Text nodes draw in a layer from a Core Text layout when they can; disclosure titles and list markers have
+      // their own views.
+      let layerText: Bool = switch role {
+      case .disclosureSummary, .listMarker: false
+      default: drawnByTextNode
+      }
+      let measurement = measureText(attributed, width: measuredWidth, singleLine: singleLine, layerText: layerText)
       let measuredHeight = measurement.height
       let accessoryWidth: CGFloat = if case .disclosureSummary = role {
         (disclosureHasChevron
@@ -1544,14 +1559,20 @@ final class RichBlockLayoutPlanner {
       measureText(text, width: width).height
     }
 
+    /// `layerText`: the text is drawn by a text node, which draws it in a layer from a Core Text layout when
+    /// `RichBlockLayerText` says so; it is then measured with that same layout, so lines break where they are drawn.
     func measureText(
       _ text: NSAttributedString,
       width: CGFloat,
-      singleLine: Bool = false
+      singleLine: Bool = false,
+      layerText: Bool = false
     ) -> TextMeasurement {
       let resolvedWidth = max(1, width)
-      let raw = textMeasurements.value(for: text, width: resolvedWidth, singleLine: singleLine) {
-        Self.layoutText(text, width: resolvedWidth, singleLine: singleLine, boundingHeight: !singleLine)
+      let coreText = layerText && RichBlockLayerText.draws(text, singleLine: singleLine)
+      let raw = textMeasurements.value(for: text, width: resolvedWidth, singleLine: singleLine, layerText: coreText) {
+        coreText
+          ? Self.coreTextLayout(text, width: resolvedWidth)
+          : Self.layoutText(text, width: resolvedWidth, singleLine: singleLine, boundingHeight: !singleLine)
       }
       return TextMeasurement(
         height: max(raw.height, ceil(baseFontSize * 1.25)),
@@ -1561,11 +1582,25 @@ final class RichBlockLayoutPlanner {
       )
     }
 
+    /// The Core Text layout the text node's layer draws (`CoreTextMessageText.layout`): its lines' frames.
+    private static func coreTextLayout(_ text: NSAttributedString, width: CGFloat) -> RawTextMeasurement {
+      let layout = CoreTextMessageText.layout(text, isRtl: RichBlockLayerText.isRtl(text), width: width)
+      let maxLineWidth = layout.lines.reduce(0) { max($0, $1.frame.width) }
+      let last = layout.lines.last?.frame ?? .zero
+      return RawTextMeasurement(
+        height: ceil(layout.size.height),
+        maxLineUsedWidth: ceil(maxLineWidth),
+        lastLineUsedWidth: ceil(last.width),
+        lastLineHeight: ceil(last.height)
+      )
+    }
+
     /// Wrapped height comes from `boundingRect`, everything else from the layout
     /// manager. The two disagree for some scripts (Thai and Devanagari lines
     /// come out taller in the layout manager), so both stay as they were; single
     /// lines never read `boundingRect`, so they skip it.
-    private static func layoutText(
+    /// Also measures a streaming code block's revealed lines (`RichBlockLayoutPlan.revealing`).
+    static func layoutText(
       _ text: NSAttributedString,
       width: CGFloat,
       singleLine: Bool,

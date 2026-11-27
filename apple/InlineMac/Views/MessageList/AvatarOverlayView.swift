@@ -180,8 +180,8 @@ final class MessageAvatarOverlayView: NSView {
 
     for view in subviews.reversed() {
       guard !view.isHidden, view.alphaValue > 0, view.frame.contains(point) else { continue }
-      let localPoint = view.convert(point, from: self)
-      if let hit = view.hitTest(localPoint) {
+      // hitTest takes the point in the superview's (this view's) coordinates.
+      if let hit = view.hitTest(point) {
         MessageGestureTrace.trace("AvatarOverlay.hitTest hit=\(MessageGestureTrace.view(hit))")
         return hit
       }

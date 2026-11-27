@@ -80,7 +80,8 @@ protocol MessageTextSelectionSource: NSView {
 /// What the message list provides to its text selection.
 @MainActor
 protocol MessageListTextSelectionHost: AnyObject {
-  var textSelectionTableView: NSTableView { get }
+  /// Where the list's rows are: the table list's table, or the timeline list.
+  var textSelectionRows: any MessageListRowGeometry { get }
   var textSelectionRootView: NSView { get }
   var isMessageSelectionActive: Bool { get }
   func textSelectionStableId(atRow row: Int) -> Int64?
@@ -110,7 +111,7 @@ final class MessageListTextSelection {
     case messages(anchorStableId: Int64, origin: NSPoint, active: Bool)
   }
 
-  private weak var host: MessageListTextSelectionHost?
+  private(set) weak var host: MessageListTextSelectionHost?
   private var eventMonitor: Any?
   private var gesture: Gesture?
   /// The view under the press that started the gesture. Its hold gestures (reactions and
@@ -132,6 +133,14 @@ final class MessageListTextSelection {
     self.host = host
   }
 
+  #if DEBUG
+  /// The timeline journey harness drives the list with posted events while the Mac may be locked, when no app can be
+  /// active and no window key: it treats its window as key for presses. Debug builds only.
+  static var treatsWindowAsKey = false
+  #else
+  static var treatsWindowAsKey: Bool { false }
+  #endif
+
   var hasSelection: Bool { selection != nil }
 
   /// A press that may become a selection drag. The table must not start its own mouse
@@ -146,7 +155,13 @@ final class MessageListTextSelection {
 
   // MARK: Lifecycle
 
+  /// The selections of the lists in the app's windows, so a message view finds its list's selection whatever the list
+  /// is (the table list's table, or the timeline list).
+  private static let installed = NSHashTable<MessageListTextSelectionBox>.weakObjects()
+  private lazy var box = MessageListTextSelectionBox(self)
+
   func install() {
+    Self.installed.add(box)
     guard eventMonitor == nil else { return }
     eventMonitor = NSEvent.addLocalMonitorForEvents(
       matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .keyDown]
@@ -157,6 +172,7 @@ final class MessageListTextSelection {
   }
 
   func uninstall() {
+    Self.installed.remove(box)
     endGesture()
     clear()
     if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
@@ -170,6 +186,10 @@ final class MessageListTextSelection {
       if let table = current as? MessageListTableView { return table.textSelection }
       ancestor = current.superview
     }
+    for box in installed.allObjects {
+      guard let selection = box.selection, let rows = selection.host?.textSelectionRows else { continue }
+      if view === rows.rowsView || view.isDescendant(of: rows.rowsView) { return selection }
+    }
     return nil
   }
 
@@ -181,7 +201,7 @@ final class MessageListTextSelection {
       item.keyEquivalent = ""
     }
     let item = NSMenuItem(title: "Copy Selected Text", action: copyAction, keyEquivalent: "c")
-    item.target = owner.host?.textSelectionTableView
+    item.target = owner.host?.textSelectionRows.keyView
     menu.insertItem(item, at: 0)
     if menu.items.count > 1 { menu.insertItem(.separator(), at: 1) }
     return menu
@@ -208,7 +228,7 @@ final class MessageListTextSelection {
       guard hasSelection, event.keyCode == 53,
             event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
             let responder = window.firstResponder as? NSView,
-            responder === host.textSelectionTableView || responder.isDescendant(of: host.textSelectionTableView)
+            host.textSelectionRows.ownsResponder(responder)
       else { return event }
       clear()
       return nil
@@ -223,18 +243,14 @@ final class MessageListTextSelection {
     host: MessageListTextSelectionHost,
     window: NSWindow
   ) -> (row: Int, stableId: Int64, cell: MessageTableCell?, hit: NSView)? {
-    guard window.isKeyWindow, window.attachedSheet == nil, !host.isMessageSelectionActive else { return nil }
-    let table = host.textSelectionTableView
-    guard let scrollView = table.enclosingScrollView, !scrollView.isHiddenOrHasHiddenAncestor,
-          scrollView.bounds.contains(scrollView.convert(event.locationInWindow, from: nil)),
-          let hit = scrollView.hitTest(scrollView.superview?.convert(event.locationInWindow, from: nil)
-            ?? event.locationInWindow),
-          hit === table || hit.isDescendant(of: table)
+    guard window.isKeyWindow || Self.treatsWindowAsKey, window.attachedSheet == nil, !host.isMessageSelectionActive
     else { return nil }
-    let row = table.row(at: table.convert(event.locationInWindow, from: nil))
-    guard row >= 0, let stableId = host.textSelectionStableId(atRow: row) else { return nil }
-    let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell
-    return (row, stableId, cell, hit)
+    let rows = host.textSelectionRows
+    guard let hit = rows.hit(atWindowPoint: event.locationInWindow),
+          let row = rows.row(at: rows.rowsView.convert(event.locationInWindow, from: nil)),
+          let stableId = host.textSelectionStableId(atRow: row)
+    else { return nil }
+    return (row, stableId, rows.cell(atRow: row), hit)
   }
 
   /// Shift-click on text moves the end of the current selection there.
@@ -256,7 +272,8 @@ final class MessageListTextSelection {
     guard event.modifierFlags.intersection([.shift, .control, .option, .command]).isEmpty,
           let press = textPress(event, host: host, window: window)
     else { return }
-    let table = host.textSelectionTableView
+    let rows = host.textSelectionRows
+    let table = rows.rowsView
     pressedView = press.hit
 
     if let textView = press.hit as? any MessageTextSurface {
@@ -284,7 +301,7 @@ final class MessageListTextSelection {
       // selections can start before the first word or after the last.
       gesture = .text(anchor: anchor, origin: event.locationInWindow, active: false)
     } else if event.clickCount == 1, press.hit as? NSTextView == nil,
-              startsMessageDrag(press.hit, in: press.cell ?? table),
+              startsMessageDrag(press.hit, in: press.cell ?? table, rows: rows),
               host.messageSelectionStableId(atRow: press.row) != nil
     {
       // Beside text: the drag selects whole messages once it reaches another message.
@@ -321,7 +338,7 @@ final class MessageListTextSelection {
   private func paddedTextAnchor(
     for event: NSEvent,
     press: (row: Int, stableId: Int64, cell: MessageTableCell?, hit: NSView),
-    table: NSTableView
+    table: NSView
   ) -> Endpoint? {
     guard let source = press.cell?.textSelectionSource,
           let region = source.textSelectionPressRegion()
@@ -341,7 +358,7 @@ final class MessageListTextSelection {
   }
 
   /// Presses on controls, media, reactions or widgets keep their own drags and clicks.
-  private func startsMessageDrag(_ hit: NSView, in container: NSView) -> Bool {
+  private func startsMessageDrag(_ hit: NSView, in container: NSView, rows: any MessageListRowGeometry) -> Bool {
     var current: NSView? = hit
     while let view = current, view !== container.superview {
       if view is NSControl || view is NSScroller || view is WKWebView || view is NSDraggingSource
@@ -352,7 +369,7 @@ final class MessageListTextSelection {
       current = view.superview
     }
     // Only plain backgrounds: the list, rows, the message and its bubble.
-    return hit is NSTableView || hit is NSTableRowView || hit is MessageTableCell
+    return rows.isRowBackground(hit) || hit is MessageTableCell
       || hit is MessageTextSelectionSource || hit is MessageBubbleBackgroundView
       || hit is MessageBubbleTailView || type(of: hit) == NSView.self
   }
@@ -374,12 +391,12 @@ final class MessageListTextSelection {
       return true
 
     case let .messages(anchorStableId, origin, active):
-      let table = host.textSelectionTableView
+      let rows = host.textSelectionRows
       guard let anchorRow = host.textSelectionRow(forStableId: anchorStableId) else {
         endGesture()
         return false
       }
-      let row = clampedRow(at: windowPoint, in: table)
+      let row = rows.clampedRow(at: rows.rowsView.convert(windowPoint, from: nil))
       if !active {
         guard moved(from: origin, to: windowPoint), let row, row != anchorRow,
               host.textSelectionStableId(atRow: row) != nil
@@ -410,8 +427,8 @@ final class MessageListTextSelection {
     guard case .text(_, _, true) = gesture else { return }
     guard !clipboardDocument().isEmpty, let host else { return clear() }
     // Copy, Escape and the Edit menu reach the list from here.
-    let table = host.textSelectionTableView
-    table.window?.makeFirstResponder(table)
+    let keyView = host.textSelectionRows.keyView
+    keyView.window?.makeFirstResponder(keyView)
     if let textView = singleMessageHeadView() {
       MessageSelectionMenu.selectionTrackingEnded(in: textView, at: windowPoint)
     }
@@ -422,7 +439,7 @@ final class MessageListTextSelection {
   private func cancelPressHolds() {
     guard let host, let pressed = pressedView else { return }
     pressedView = nil
-    let table = host.textSelectionTableView
+    let table = host.textSelectionRows.rowsView
     var current: NSView? = pressed
     while let view = current, view !== table {
       current = view.superview
@@ -457,23 +474,14 @@ final class MessageListTextSelection {
 
   // MARK: Endpoints
 
-  private func clampedRow(at windowPoint: NSPoint, in table: NSTableView) -> Int? {
-    guard table.numberOfRows > 0 else { return nil }
-    let point = table.convert(windowPoint, from: nil)
-    let row = table.row(at: NSPoint(x: table.bounds.midX, y: point.y))
-    if row >= 0 { return row }
-    if point.y < table.bounds.minY { return table.isFlipped ? 0 : table.numberOfRows - 1 }
-    if point.y > table.bounds.maxY { return table.isFlipped ? table.numberOfRows - 1 : 0 }
-    return nil
-  }
-
   /// The selection end for the pointer. Over a row without text (a date, a photo), the selection
   /// ends at the edge of the nearest text toward the anchor, like native text selection.
   private func headEndpoint(at windowPoint: NSPoint, anchor: Endpoint) -> Endpoint? {
-    guard let host, let pointerRow = clampedRow(at: windowPoint, in: host.textSelectionTableView),
+    let rows = host?.textSelectionRows
+    guard let host, let rows, let pointerRow = rows.clampedRow(at: rows.rowsView.convert(windowPoint, from: nil)),
           let anchorRow = host.textSelectionRow(forStableId: anchor.stableId)
     else { return nil }
-    let table = host.textSelectionTableView
+    let table = rows.rowsView
     var row = pointerRow
     while true {
       if let stableId = host.textSelectionStableId(atRow: row),
@@ -494,8 +502,7 @@ final class MessageListTextSelection {
   }
 
   private func projection(atRow row: Int) -> MessageTextSelectionProjection? {
-    guard let cell = host?.textSelectionTableView.view(atColumn: 0, row: row, makeIfNecessary: false)
-      as? MessageTableCell,
+    guard let cell = host?.textSelectionRows.cell(atRow: row),
       let projection = cell.textSelectionSource?.textSelectionProjection(),
       !projection.textViews.isEmpty
     else { return nil }
@@ -507,7 +514,7 @@ final class MessageListTextSelection {
     in projection: MessageTextSelectionProjection,
     stableId: Int64,
     at windowPoint: NSPoint,
-    table: NSTableView
+    table: NSView
   ) -> Endpoint? {
     let point = table.convert(windowPoint, from: nil)
     var nearest: (surface: Int, rect: CGRect, distance: CGFloat)?
@@ -606,13 +613,10 @@ final class MessageListTextSelection {
   private func refreshVisible() {
     guard let host, hasSelection else { return clear() }
     guard orderedBounds() != nil else { return clear() }
-    let table = host.textSelectionTableView
-    let visible = table.rows(in: table.visibleRect)
+    let rows = host.textSelectionRows
     var touched = Set<ObjectIdentifier>()
-    for row in visible.lowerBound ..< visible.upperBound {
-      guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell,
-            let stableId = host.textSelectionStableId(atRow: row)
-      else { continue }
+    for row in rows.placedRows {
+      guard let cell = rows.cell(atRow: row), let stableId = host.textSelectionStableId(atRow: row) else { continue }
       for textView in apply(to: cell, row: row, stableId: stableId) {
         touched.insert(ObjectIdentifier(textView))
       }
@@ -671,7 +675,7 @@ final class MessageListTextSelection {
   /// The selected text when the selection lies entirely in the message containing `view`.
   func selectedText(onlyIn view: NSView) -> String? {
     guard let host, let bounds = orderedBounds(), bounds.lowerRow == bounds.upperRow,
-          host.textSelectionTableView.row(for: view) == bounds.lowerRow
+          host.textSelectionRows.row(containing: view) == bounds.lowerRow
     else { return nil }
     let document = clipboardDocument()
     return document.isEmpty ? nil : document.plainText
@@ -679,10 +683,9 @@ final class MessageListTextSelection {
 
   /// Whether the selection includes any text of the message containing `view`.
   func covers(_ view: NSView) -> Bool {
-    guard hasSelection, let host else { return false }
-    let table = host.textSelectionTableView
-    let row = table.row(for: view)
-    guard row >= 0, let bounds = orderedBounds() else { return false }
+    guard hasSelection, let host, let row = host.textSelectionRows.row(containing: view),
+          let bounds = orderedBounds()
+    else { return false }
     return row >= bounds.lowerRow && row <= bounds.upperRow
   }
 
@@ -705,22 +708,13 @@ final class MessageListTextSelection {
     autoscrollTimer = timer
   }
 
-  /// The scroll view's visible message area in window coordinates, past toolbar and composer insets.
+  /// The list's visible message area in window coordinates, past toolbar and composer insets.
   private func autoscrollRegion() -> NSRect? {
-    guard let scrollView = host?.textSelectionTableView.enclosingScrollView else { return nil }
-    let insets = scrollView.contentInsets
-    var rect = scrollView.bounds
-    rect.origin.x += insets.left
-    rect.size.width -= insets.left + insets.right
-    rect.size.height -= insets.top + insets.bottom
-    if !scrollView.isFlipped { rect.origin.y += insets.bottom } else { rect.origin.y += insets.top }
-    guard rect.height > 32 else { return scrollView.convert(scrollView.bounds, to: nil) }
-    return scrollView.convert(rect, to: nil)
+    host?.textSelectionRows.autoscrollRegion(insetsOnly: true)
   }
 
   private func autoscrollTick() {
     guard gesture != nil, let host, let window = host.textSelectionRootView.window,
-          let scrollView = host.textSelectionTableView.enclosingScrollView,
           let visible = autoscrollRegion()
     else { return endGesture() }
     let point = window.mouseLocationOutsideOfEventStream
@@ -734,13 +728,7 @@ final class MessageListTextSelection {
     }
     // Faster the further past the edge, like the message selection drag.
     let step = min(max(abs(distance) * 0.6, 6), 40) * (distance > 0 ? 1 : -1)
-    let clip = scrollView.contentView
-    var proposed = clip.bounds
-    proposed.origin.y += clip.isFlipped ? -step : step
-    let origin = clip.constrainBoundsRect(proposed).origin
-    guard origin.y != clip.bounds.origin.y else { return }
-    clip.scroll(to: origin)
-    scrollView.reflectScrolledClipView(clip)
+    guard host.textSelectionRows.autoscroll(by: step) else { return }
     _ = drag(to: point)
   }
 
@@ -791,6 +779,15 @@ final class MessageListTextSelection {
   @discardableResult
   func copySelection(to pasteboard: NSPasteboard = .general) -> Bool {
     MessageClipboard.write(clipboardDocument(), to: pasteboard)
+  }
+}
+
+/// A weak handle on a list's selection, for the registry of installed selections.
+@MainActor
+final class MessageListTextSelectionBox: NSObject {
+  weak var selection: MessageListTextSelection?
+  init(_ selection: MessageListTextSelection) {
+    self.selection = selection
   }
 }
 
