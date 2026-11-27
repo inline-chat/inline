@@ -18,8 +18,8 @@ Use an authenticated realtime session. On V3, the upload belongs to its user, ac
 | Media kind | Maximum file size |
 | --- | ---: |
 | Photo | 40,000,000 bytes |
-| Video | 200,000,000 bytes |
-| Document | 200,000,000 bytes |
+| Video | 500,000,000 bytes |
+| Document | 500,000,000 bytes |
 | Voice | 20,000,000 bytes |
 
 The part size is currently 524,288 bytes, with at most 1,000 parts. The media limit above is the operative file-size limit. A file must contain at least one byte. `CREATE_UPLOAD` supplies a 32-byte whole-file SHA-256 digest, a nonempty file name and MIME type (each at most 255 characters), and kind-specific metadata. Photos accept JPEG or PNG MIME types. See [`CreateUploadInput`](https://github.com/inline-chat/inline/blob/main/proto/core.proto) for fields.
@@ -85,12 +85,16 @@ This wire-level sequence is for adapter authors. SDK applications can use the pr
 
 
 1. Generate and retain a 16-byte `client_upload_id`. Compute SHA-256 over the source bytes.
-2. Call `CREATE_UPLOAD` with that identity, metadata, byte count, and digest. Keep `upload_id`, `part_size`, `part_count`, `expires_at` (Unix seconds), and `accepted_parts`.
-3. Send every unaccepted zero-based part with `SAVE_UPLOAD_PART`. Every part except the final one must have exactly `part_size` bytes; the final part has the remainder. Parts can arrive out of order.
-4. Call `FINISH_UPLOAD`. If it reports processing, wait `retry_after_seconds` and query or finish the **same** upload. Continue until `complete` or `failed`.
+2. Call `CREATE_UPLOAD` with that identity, metadata, byte count, and digest. Keep `upload_id`, `part_size`, `part_count`, `expires_at` (Unix seconds), and `accepted_parts`. A file of at most one part can carry its bytes in `inline_data`: the server stores and finishes it in the same call and returns `complete`. If `complete` is absent, continue with the steps below; part 0 is listed in `accepted_parts` when the server kept it.
+3. Send every unaccepted zero-based part with `SAVE_UPLOAD_PART`. Every part except the final one must have exactly `part_size` bytes; the final part has the remainder. Parts can arrive out of order, and several can be in flight at once.
+4. Call `FINISH_UPLOAD`. If it reports `missing`, send those parts and finish again. If it reports processing, wait `retry_after_seconds` and query or finish the **same** upload. Continue until `complete` or `failed`.
 5. Use returned typed media in a separate send operation. Verify the send result before treating the file as posted to a chat.
 
-An identical retry of an accepted part succeeds with `already_present: true`. Reusing its index with different bytes fails. Replaying `CREATE_UPLOAD` with the same owner, `client_upload_id`, and metadata returns the existing upload and accepted indices; changing metadata conflicts.
+The server replies to `SAVE_UPLOAD_PART` once it holds the bytes and stores them after replying, so a reply means received, not stored. A part it loses before storing it, after a failed write or a restart, is reported by `FINISH_UPLOAD` in `missing`; send it again. An identical retry of a part the server already has succeeds with `already_present: true`. Do not reuse an index with different bytes: the whole-file digest check fails the upload.
+
+### Send a part in pieces
+
+When `CREATE_UPLOAD` returns `piece_granularity`, a part can also arrive in pieces, so progress can start after a few kilobytes instead of a whole part. Send each piece with `SAVE_UPLOAD_PART`, the part's `part_index`, and the piece's byte `offset` inside the part. A piece starts at a multiple of `piece_granularity` and is a multiple of it long, except the piece that ends its part. Pieces can arrive in any order and can be resent. The part joins `accepted_parts` once all of its bytes have arrived. If `piece_granularity` is absent, send whole parts. Replaying `CREATE_UPLOAD` with the same owner, `client_upload_id`, and metadata returns the existing upload and accepted indices; changing metadata conflicts.
 
 ### TypeScript helper
 
@@ -105,14 +109,14 @@ After a timeout or lost response, first call `GET_UPLOAD_STATE` with the existin
 | State | Recovery |
 | --- | --- |
 | `UPLOADING` | Use `accepted_parts` to send missing indices, then finish. |
-| `PROCESSING` | Wait before querying the same upload again. `FINISH_UPLOAD.processing` supplies `retry_after_seconds`; the current service returns 2 seconds. |
+| `PROCESSING` | Wait before querying the same upload again. `FINISH_UPLOAD.processing` supplies `retry_after_seconds`; the current service returns 1 second. |
 | `COMPLETE` | Use `complete`, which contains `file_unique_id` and one typed media value. |
 | `FAILED` | Inspect `failure.code` and `failure.retryable`; reconcile the original upload before deciding on a new attempt. |
 | `CANCELED` or `EXPIRED` | Stop sending parts. Start a new upload only if the caller still wants the file. |
 
 `FINISH_UPLOAD.missing.part_indices` identifies the parts to send before finishing again. `FINISH_UPLOAD.processing` does not mean finalization completed. Do not create a second upload after a lost finish response. The server checks the whole-file digest during finalization; integrity or media-validation errors become a failed upload.
 
-An active upload expires after 24 hours without an accepted part, with an absolute lifetime of seven days. Each accepted part can extend idle expiry up to that hard limit. The `expires_at` returned at creation is the current idle deadline, not a permanent reservation.
+An active upload expires about 24 hours after its last accepted part, with an absolute lifetime of seven days. Accepted parts extend idle expiry up to that hard limit, at most once an hour, so the idle deadline can fall up to an hour sooner than 24 hours after the latest part. The `expires_at` returned at creation is the current idle deadline, not a permanent reservation.
 
 ## Ownership and cancellation
 
@@ -125,12 +129,12 @@ The owner is the user and account session; V3 additionally binds the permanent a
 | Method | Input | Result and completion boundary |
 | --- | --- | --- |
 | `CREATE_UPLOAD` | `client_upload_id`, metadata, `byte_count`, `sha256`, `kind` | Returns `upload_id`, geometry, expiry, and accepted indices after admission; file bytes are not complete. |
-| `SAVE_UPLOAD_PART` | `upload_id`, `part_index`, exact `data` | Returns `already_present` after the part is accepted. |
+| `SAVE_UPLOAD_PART` | `upload_id`, `part_index`, exact `data`, optional `offset` for a piece | Returns `already_present` once the server holds the bytes; `FINISH_UPLOAD` reports any it lost. |
 | `GET_UPLOAD_STATE` | `upload_id` | Returns status, accepted indices, and optional completion or failure detail. |
 | `FINISH_UPLOAD` | `upload_id` | Returns `missing`, `processing`, `complete`, or `failed`; processing is not completion. |
 | `CANCEL_UPLOAD` | `upload_id` | Reports whether cancellation occurred or the upload was already terminal. |
 
-All methods require the upload owner. Invalid input, ownership mismatch, part conflict, or admission capacity can produce RPC errors; inspect the error before retrying. The current service limits each account session to 20 active uploads and 2 GiB of reserved upload bytes; admission beyond either limit returns a rate-limit error. See [RPC Semantics](/docs/technical/rpc) for commit-unknown requests and [Protocol Schema](/docs/technical/protocol-schema) for exact wire fields.
+All methods require the upload owner. Invalid input, ownership mismatch, part conflict, or admission capacity can produce RPC errors; inspect the error before retrying. While part storage is unavailable, `SAVE_UPLOAD_PART` returns a retryable service-unavailable error (code 503) with `retry_after_seconds`, currently 5; wait and resend. The current service limits each account session to 20 active uploads and 2 GiB of reserved upload bytes; admission beyond either limit returns a rate-limit error. See [RPC Semantics](/docs/technical/rpc) for commit-unknown requests and [Protocol Schema](/docs/technical/protocol-schema) for exact wire fields.
 
 ## Summary
 
