@@ -1,7 +1,6 @@
-import { sha1 } from "@noble/hashes/legacy"
-import { sha256 } from "@noble/hashes/sha2"
 import { concatBytes, equalBytes } from "./bytes.js"
 import { getAesBackend, type AesCtrState } from "./aesBackend.js"
+import { digest } from "./digest.js"
 
 const BLOCK_BYTES = 16
 
@@ -9,8 +8,8 @@ const assertLength = (name: string, bytes: Uint8Array, length: number): void => 
   if (bytes.length !== length) throw new RangeError(`${name} must be ${length} bytes`)
 }
 
-export const sha1Digest = (...parts: readonly Uint8Array[]): Uint8Array => sha1(concatBytes(...parts))
-export const sha256Digest = (...parts: readonly Uint8Array[]): Uint8Array => sha256(concatBytes(...parts))
+export const sha1Digest = (...parts: readonly Uint8Array[]): Uint8Array => digest("sha1", parts)
+export const sha256Digest = (...parts: readonly Uint8Array[]): Uint8Array => digest("sha256", parts)
 export { equalBytes as constantTimeEqual }
 
 export const authKeyId = (authKey: Uint8Array): Uint8Array => {
