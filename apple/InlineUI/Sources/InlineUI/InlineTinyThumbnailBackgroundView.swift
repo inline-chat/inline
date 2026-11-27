@@ -860,6 +860,13 @@ public final class InlineTinyThumbnailBackgroundView: PlatformView {
     isUserInteractionEnabled = false
     #endif
 
+    #if os(macOS)
+    // Fills by autoresizing: message rows place their media by frame, and one constraint here would pull the whole
+    // row into the window's layout engine.
+    imageView.frame = bounds
+    imageView.autoresizingMask = [.width, .height]
+    addSubview(imageView)
+    #else
     imageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(imageView)
 
@@ -869,6 +876,7 @@ public final class InlineTinyThumbnailBackgroundView: PlatformView {
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+    #endif
   }
 }
 

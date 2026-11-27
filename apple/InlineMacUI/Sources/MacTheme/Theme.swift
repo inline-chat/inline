@@ -28,15 +28,17 @@ public enum Theme {
       NSColor(red: 158 / 255, green: 158 / 255, blue: 158 / 255, alpha: 1)
   }
 
-  /// Theme colors are computed so changing presets creates a fresh dynamic color.
+  /// Theme colors are dynamic and keep their identity until the theme changes (see
+  /// `ThemeColorCache`): equal values compare equal, so rows can skip work on reconfigure, and a
+  /// preset or palette change hands out fresh colors that SwiftUI sees as changed.
   /// These colors must remain unnamed: SwiftUI compares named NSColors by name,
   /// which would make two different theme values appear equal during live updates.
   public static var accentColor: NSColor {
-    semanticColor(role: .accent)
+    ThemeColorCache.color(.role(.accent))
   }
 
   public static var prominentColor: NSColor {
-    semanticColor(role: .prominent)
+    ThemeColorCache.color(.role(.prominent))
   }
 
   public static func resolvedColor(
@@ -244,7 +246,7 @@ public enum Theme {
 
   // - after bubble -
   public static var messageBubblePrimaryBgColor: NSColor {
-    semanticColor(role: .bubble)
+    ThemeColorCache.color(.role(.bubble))
   }
 
   public static let messageBubbleGradientTopOverlayAlpha = CGFloat(
@@ -296,11 +298,7 @@ public enum Theme {
   }
 
   public static var messageBubbleSecondaryBgColor: NSColor {
-    .init(name: nil) { appearance in
-      let preset = ThemePreference.selectedPreset()
-      let variant = ThemeAppearanceVariant(appearance: appearance)
-      return resolvedSecondaryBubbleColor(preset: preset, variant: variant).nsColor
-    }
+    ThemeColorCache.color(.secondaryBubble)
   }
 
   public static func resolvedSecondaryBubbleColor(
@@ -312,10 +310,7 @@ public enum Theme {
   }
 
   public static var messageBubbleSecondaryTextColor: NSColor {
-    .init(name: nil) { appearance in
-      let variant = ThemeAppearanceVariant(appearance: appearance)
-      return resolvedSecondaryBubbleTextColor(variant: variant).nsColor
-    }
+    ThemeColorCache.color(.secondaryBubbleText)
   }
 
   public static func resolvedSecondaryBubbleTextColor(
@@ -328,11 +323,7 @@ public enum Theme {
   }
 
   public static var messageBubbleSecondaryLinkColor: NSColor {
-    .init(name: nil) { appearance in
-      let preset = ThemePreference.selectedPreset()
-      let variant = ThemeAppearanceVariant(appearance: appearance)
-      return resolvedSecondaryBubbleLinkColor(preset: preset, variant: variant).nsColor
-    }
+    ThemeColorCache.color(.secondaryBubbleLink)
   }
 
   public static func resolvedSecondaryBubbleLinkColor(
@@ -443,11 +434,21 @@ public enum Theme {
       .withAlphaComponent(0.09)
   }
 
-  private static func semanticColor(role: ThemeColorRole) -> NSColor {
-    NSColor(name: nil) { appearance in
-      let preset = ThemePreference.selectedPreset()
-      let variant = ThemeAppearanceVariant(appearance: appearance)
-      return resolvedColor(role: role, preset: preset, variant: variant).nsColor
+  /// The value a cached dynamic theme color resolves to for the stored preset and overrides.
+  static func resolvedDynamicColor(
+    _ key: ThemeColorCache.Key,
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant
+  ) -> NSColor {
+    switch key {
+    case let .role(role):
+      resolvedColor(role: role, preset: preset, variant: variant).nsColor
+    case .secondaryBubble:
+      resolvedSecondaryBubbleColor(preset: preset, variant: variant).nsColor
+    case .secondaryBubbleText:
+      resolvedSecondaryBubbleTextColor(variant: variant).nsColor
+    case .secondaryBubbleLink:
+      resolvedSecondaryBubbleLinkColor(preset: preset, variant: variant).nsColor
     }
   }
 
@@ -518,5 +519,113 @@ private enum WindowSurfaceColorCache {
     entries[variant] = (key, color)
     lock.unlock()
     return color
+  }
+}
+
+/// Dynamic theme colors and their resolved values, kept until the theme changes.
+///
+/// Message rows read these on every configure and resolve them on every draw. A fresh dynamic
+/// color per access made equal colors compare unequal (so views redrew for nothing), and each
+/// resolve read the preset from user defaults and rebuilt the palette, decoding the overrides.
+/// Writing the preset or the overrides drops the cache (user defaults post their change
+/// synchronously on the writing thread), so the next access hands out new color objects and
+/// colors already handed out resolve to the new theme.
+enum ThemeColorCache {
+  enum Key: Hashable, Sendable {
+    case role(ThemeColorRole)
+    case secondaryBubble
+    case secondaryBubbleText
+    case secondaryBubbleLink
+  }
+
+  private struct ResolvedKey: Hashable {
+    let key: Key
+    let variant: ThemeAppearanceVariant
+  }
+
+  /// The stored values the cached colors depend on.
+  private struct Inputs: Equatable {
+    let preset: String?
+    let overrides: Data?
+
+    static func current() -> Inputs {
+      let defaults = UserDefaults.standard
+      return Inputs(
+        preset: defaults.string(forKey: ThemePreference.selectedPresetKey),
+        overrides: defaults.data(forKey: ThemePaletteOverrides.storageKey)
+      )
+    }
+  }
+
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var generation = 0
+  nonisolated(unsafe) private static var inputs: Inputs?
+  nonisolated(unsafe) private static var colors: [Key: NSColor] = [:]
+  nonisolated(unsafe) private static var resolved: [ResolvedKey: NSColor] = [:]
+
+  private static let isObserving: Bool = {
+    let current = Inputs.current()
+    lock.lock()
+    inputs = current
+    lock.unlock()
+    let center = NotificationCenter.default
+    _ = center.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { _ in
+      storedInputsMayHaveChanged()
+    }
+    // The System preset's canvas is the native window background.
+    _ = center.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: nil) { _ in
+      invalidate()
+    }
+    return true
+  }()
+
+  static func color(_ key: Key) -> NSColor {
+    _ = isObserving
+    lock.lock()
+    defer { lock.unlock() }
+    if let color = colors[key] { return color }
+    let color = NSColor(name: nil) { appearance in
+      resolvedColor(key, variant: ThemeAppearanceVariant(appearance: appearance))
+    }
+    colors[key] = color
+    return color
+  }
+
+  static func resolvedColor(_ key: Key, variant: ThemeAppearanceVariant) -> NSColor {
+    let resolvedKey = ResolvedKey(key: key, variant: variant)
+    lock.lock()
+    if let color = resolved[resolvedKey] {
+      lock.unlock()
+      return color
+    }
+    let generation = generation
+    lock.unlock()
+
+    // Outside the lock: resolving may read and migrate stored overrides, which posts a change.
+    let color = Theme.resolvedDynamicColor(key, preset: ThemePreference.selectedPreset(), variant: variant)
+    lock.lock()
+    if generation == self.generation {
+      resolved[resolvedKey] = color
+    }
+    lock.unlock()
+    return color
+  }
+
+  /// Drops the cached colors: the next access creates new ones.
+  static func invalidate() {
+    lock.lock()
+    generation &+= 1
+    colors.removeAll()
+    resolved.removeAll()
+    lock.unlock()
+  }
+
+  private static func storedInputsMayHaveChanged() {
+    let current = Inputs.current()
+    lock.lock()
+    let changed = current != inputs
+    inputs = current
+    lock.unlock()
+    if changed { invalidate() }
   }
 }

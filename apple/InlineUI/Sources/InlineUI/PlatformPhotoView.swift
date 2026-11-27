@@ -303,6 +303,16 @@ public final class PlatformPhotoView: PlatformView {
     #endif
     translatesAutoresizingMaskIntoConstraints = false
 
+    #if os(macOS)
+    // The three layers fill by autoresizing: message rows place their media by frame, and one constraint here would
+    // pull the whole row into the window's layout engine.
+    for view in [tinyThumbnailBackgroundView, placeholderView, imageView] {
+      view.translatesAutoresizingMaskIntoConstraints = true
+      view.frame = bounds
+      view.autoresizingMask = [.width, .height]
+      addSubview(view)
+    }
+    #else
     tinyThumbnailBackgroundView.translatesAutoresizingMaskIntoConstraints = false
     imageView.translatesAutoresizingMaskIntoConstraints = false
     placeholderView.translatesAutoresizingMaskIntoConstraints = false
@@ -327,6 +337,7 @@ public final class PlatformPhotoView: PlatformView {
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+    #endif
 
     imageView.updateContentMode(photoContentMode)
     updateTinyThumbnailBackground()

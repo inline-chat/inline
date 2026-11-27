@@ -5,13 +5,45 @@ import Testing
 
 @Suite("macOS theme palettes", .serialized)
 struct ThemeTests {
-  @Test("live theme colors have distinct SwiftUI identity")
-  func liveThemeColorsHaveDistinctIdentity() {
-    #expect(Theme.accentColor != Theme.accentColor)
-    #expect(Theme.prominentColor != Theme.prominentColor)
+  @Test("live theme colors keep their identity until the theme changes")
+  func liveThemeColorsChangeIdentityWithTheTheme() {
+    let defaults = UserDefaults.standard
+    let storedPreset = defaults.object(forKey: ThemePreference.selectedPresetKey)
+    defer { defaults.set(storedPreset, forKey: ThemePreference.selectedPresetKey) }
+    defaults.set(AppThemePreset.system.rawValue, forKey: ThemePreference.selectedPresetKey)
+
+    let accent = Theme.accentColor
+    let bubble = Theme.messageBubblePrimaryBgColor
+    let incoming = Theme.messageBubbleSecondaryBgColor
+    #expect(Theme.accentColor === accent)
+    #expect(Theme.prominentColor === Theme.prominentColor)
+    #expect(Theme.messageBubblePrimaryBgColor === bubble)
+    #expect(Theme.messageBubbleSecondaryBgColor === incoming)
+    #expect(Theme.messageBubbleSecondaryLinkColor === Theme.messageBubbleSecondaryLinkColor)
     #expect(Theme.windowContentBackgroundColor != Theme.windowContentBackgroundColor)
     #expect(Theme.settingsWindowBackgroundColor != Theme.settingsWindowBackgroundColor)
-    #expect(Theme.messageBubblePrimaryBgColor != Theme.messageBubblePrimaryBgColor)
+
+    // An unrelated defaults write keeps them.
+    defaults.set(true, forKey: "themeTests.unrelated")
+    defaults.removeObject(forKey: "themeTests.unrelated")
+    #expect(Theme.accentColor === accent)
+
+    defaults.set(AppThemePreset.sunset.rawValue, forKey: ThemePreference.selectedPresetKey)
+    #expect(Theme.accentColor !== accent)
+    #expect(Theme.messageBubblePrimaryBgColor !== bubble)
+    #expect(Theme.messageBubbleSecondaryBgColor !== incoming)
+    for variant in ThemeAppearanceVariant.allCases {
+      let appearance = variant.nsAppearance
+      // A color handed out before the change resolves to the new theme too.
+      #expect(
+        ThemeColorValue(nsColor: bubble, appearance: appearance)
+          == Theme.resolvedColor(role: .bubble, preset: .sunset, variant: variant)
+      )
+      #expect(
+        ThemeColorValue(nsColor: Theme.messageBubbleSecondaryBgColor, appearance: appearance)
+          == Theme.resolvedSecondaryBubbleColor(preset: .sunset, variant: variant)
+      )
+    }
   }
 
   @Test("sidebar tint follows its independent preference")

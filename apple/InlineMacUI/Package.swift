@@ -8,6 +8,8 @@ let baseDependencies: [PackageDescription.Target.Dependency] = [
   .product(name: "InlineRTC", package: "InlineKit"),
   .product(name: "InlineMacSidebarModel", package: "InlineMacSidebarModel"),
   "InlineUI",
+  .product(name: "TimelineCore", package: "InlineTimeline"),
+  .product(name: "TimelineAppKit", package: "InlineTimeline"),
 ]
 
 let swiftSettings: [SwiftSetting] = [
@@ -36,6 +38,7 @@ let package = Package(
     .package(name: "InlineMacSidebarModel", path: "../InlineMacSidebarModel"),
     .package(name: "InlineUI", path: "../InlineUI"),
     .package(name: "InlineContextMenu", path: "../InlineContextMenu"),
+    .package(name: "InlineTimeline", path: "../InlineTimeline"),
     // .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
   ],
 
