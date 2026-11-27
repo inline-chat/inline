@@ -25,10 +25,10 @@ use crate::{
     ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot, ClientBackend,
     ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientFailure, ClientStatus,
     ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
-    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogsPage,
-    DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
-    InMemoryBackend, InlineId, InvokeBotChatSettingsItemRequest, MessageMutation, OperationOutcome,
-    PinMessageRequest, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
+    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogRecord,
+    DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage,
+    HistoryRequest, InMemoryBackend, InlineId, InvokeBotChatSettingsItemRequest, MessageMutation,
+    OperationOutcome, PinMessageRequest, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
     RequestBotChatSettingsRequest, SearchUsersRequest, SendInteractiveTextRequest, SendTextOutcome,
     SendTextRequest, SetMarkedUnreadRequest, SpaceMembersPage, SpaceMembersRequest, TypingRequest,
     UpdateChatInfoRequest, UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest,
@@ -444,6 +444,19 @@ impl InlineClient {
         match self.request(ClientRequest::RefreshAccountState).await? {
             ClientResponse::AccountState(snapshot) => Ok(snapshot),
             other => unreachable!("refresh_account_state returned {other:?}"),
+        }
+    }
+
+    /// Reads one chat from the source without storing it. The server creates
+    /// the account's dialog for that chat if it has none; see
+    /// `ClientBackend::fetch_dialog`.
+    pub async fn fetch_dialog(
+        &self,
+        chat_id: InlineId,
+    ) -> Result<Option<DialogRecord>, ClientRequestError> {
+        match self.request(ClientRequest::FetchDialog(chat_id)).await? {
+            ClientResponse::FetchedDialog(dialog) => Ok(dialog.map(|dialog| *dialog)),
+            other => unreachable!("fetch_dialog returned {other:?}"),
         }
     }
 
@@ -1238,6 +1251,11 @@ impl ClientRunner {
                 .refresh_account_state()
                 .await
                 .map(ClientResponse::AccountState),
+            ClientRequest::FetchDialog(chat_id) => self
+                .backend
+                .fetch_dialog(chat_id)
+                .await
+                .map(|dialog| ClientResponse::FetchedDialog(dialog.map(Box::new))),
             ClientRequest::Users(request) => {
                 self.backend.users(request).await.map(ClientResponse::Users)
             }
@@ -1548,6 +1566,10 @@ async fn handle_concurrent_request(
             .refresh_account_state()
             .await
             .map(ClientResponse::AccountState),
+        ClientRequest::FetchDialog(chat_id) => backend
+            .fetch_dialog(chat_id)
+            .await
+            .map(|dialog| ClientResponse::FetchedDialog(dialog.map(Box::new))),
         ClientRequest::Users(request) => backend.users(request).await.map(ClientResponse::Users),
         ClientRequest::SearchUsers(request) => backend
             .search_users(request)
@@ -1838,6 +1860,7 @@ enum ClientRequest {
     CachedDialogs(DialogsRequest),
     AccountState,
     RefreshAccountState,
+    FetchDialog(InlineId),
     Users(UsersRequest),
     SearchUsers(SearchUsersRequest),
     SpaceMembers(SpaceMembersRequest),
@@ -1908,6 +1931,7 @@ impl ClientRequest {
             Self::CachedDialogs(_) => "cached_dialogs",
             Self::AccountState => "account_state",
             Self::RefreshAccountState => "refresh_account_state",
+            Self::FetchDialog(_) => "fetch_dialog",
             Self::Users(_) => "users",
             Self::SearchUsers(_) => "search_users",
             Self::SpaceMembers(_) => "space_members",
@@ -2010,6 +2034,7 @@ enum ClientResponse {
     AuthVerify(AuthVerifyResult),
     Dialogs(DialogsPage),
     AccountState(AccountStateSnapshot),
+    FetchedDialog(Option<Box<DialogRecord>>),
     Users(UsersPage),
     SpaceMembers(SpaceMembersPage),
     ChatState(Box<ChatStateSnapshot>),

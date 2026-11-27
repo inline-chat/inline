@@ -1047,21 +1047,30 @@ impl SdkBackend {
             self.install_realtime(connected).await;
         }
         drop(exclusive);
-        if initial_event_policy == InitialEventPolicy::StartAfterCurrent {
-            self.seed_initial_event_cursor().await?;
+        match initial_event_policy {
+            InitialEventPolicy::ReplayExisting => {}
+            InitialEventPolicy::StartAfterCurrent => self.seed_initial_event_cursor(false).await?,
+            InitialEventPolicy::StartAtCurrentPosition => {
+                self.seed_initial_event_cursor(true).await?
+            }
         }
         Ok(ClientStatusSnapshot::current(
             crate::ClientStatus::Connected,
         ))
     }
 
-    async fn seed_initial_event_cursor(&self) -> BackendResult<()> {
+    async fn seed_initial_event_cursor(&self, skip_history: bool) -> BackendResult<()> {
         let suppress_history = should_suppress_initial_history(
             self.store
                 .sync_state()
                 .await
                 .map_err(store_error_to_backend)?,
         );
+        if suppress_history && skip_history && self.sync.seed_current(&self.source_scope()).await? {
+            self.acknowledge_initial_deliveries(Vec::new()).await?;
+            self.sync_required.store(false, Ordering::Release);
+            return Ok(());
+        }
         let deliveries = self.sync.discover(&self.source_scope()).await?;
         if suppress_history {
             self.acknowledge_initial_deliveries(deliveries).await?;
@@ -1486,6 +1495,47 @@ impl ClientBackend for SdkBackend {
                 .dialogs(request)
                 .await
                 .map_err(store_error_to_backend)
+        })
+    }
+
+    fn fetch_dialog(
+        &self,
+        chat_id: InlineId,
+    ) -> BoxFuture<'static, BackendResult<Option<DialogRecord>>> {
+        let backend = self.source_scope();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            let result = match backend
+                .call_realtime(
+                    &session,
+                    proto::GetChatInput {
+                        peer_id: Some(input_peer_for_chat(chat_id)),
+                        include_recent_messages: false,
+                    },
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(error)
+                    if matches!(
+                        error.category,
+                        ClientErrorCategory::NotFound | ClientErrorCategory::PermissionDenied
+                    ) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+            let Some(chat) = result.chat.filter(|chat| chat.id == chat_id.get()) else {
+                return Ok(None);
+            };
+            let snapshot = proto::GetChatsResult {
+                chats: vec![chat],
+                dialogs: result.dialog.into_iter().collect(),
+                users: result.user.into_iter().collect(),
+                ..Default::default()
+            };
+            Ok(dialog_records_from_get_chats(&snapshot).into_iter().next())
         })
     }
 
@@ -3726,15 +3776,61 @@ impl SdkBackend {
                     })
                     .await
                     .map_err(store_error_to_backend)?;
-                Ok(dialogs
+                if let Some(chat_id) = dialogs
                     .dialogs
                     .into_iter()
                     .find(|dialog| dialog.peer_user_id == Some(InlineId::new(user.user_id)))
                     .map(|dialog| dialog.chat_id)
-                    .or(fallback))
+                    .or(fallback)
+                {
+                    return Ok(Some(chat_id));
+                }
+                // A store that started at the current position (a fresh
+                // listener) has not seen this DM. The update proves it exists:
+                // read that one DM instead of failing the batch into a repair.
+                // Boxed: this rare network read must not grow every apply future.
+                Box::pin(self.fetch_and_record_dm(user.user_id)).await
             }
             None => Ok(fallback),
         }
+    }
+
+    async fn fetch_and_record_dm(&self, user_id: i64) -> BackendResult<Option<InlineId>> {
+        let session = self.require_session().await?;
+        let result = self
+            .call_realtime(
+                &session,
+                proto::GetChatInput {
+                    peer_id: Some(proto::InputPeer {
+                        r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                            user_id,
+                        })),
+                    }),
+                    include_recent_messages: false,
+                },
+            )
+            .await?;
+        let Some(chat) = result.chat else {
+            return Ok(None);
+        };
+        let snapshot = proto::GetChatsResult {
+            chats: vec![chat],
+            dialogs: result.dialog.into_iter().collect(),
+            users: result.user.into_iter().collect(),
+            ..Default::default()
+        };
+        let Some(dialog) = dialog_records_from_get_chats(&snapshot).into_iter().next() else {
+            return Ok(None);
+        };
+        if dialog.peer_user_id != Some(InlineId::new(user_id)) {
+            return Ok(None);
+        }
+        let chat_id = dialog.chat_id;
+        self.store
+            .record_dialog(dialog)
+            .await
+            .map_err(store_error_to_backend)?;
+        Ok(Some(chat_id))
     }
 
     async fn mutate_dialog(
@@ -10439,6 +10535,101 @@ mod tests {
                 date: Some(13),
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn apply_updates_reads_an_unseen_dm_instead_of_failing_the_delete() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen::default(),
+                    )),
+                },
+            )
+            .await;
+            let get_chat = read_test_client_message(&mut ws).await;
+            let user_peer = proto::InputPeer {
+                r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                    user_id: 42,
+                })),
+            };
+            assert!(matches!(
+                &get_chat.body,
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    input: Some(proto::rpc_call::Input::GetChat(input)),
+                    ..
+                })) if input.peer_id == Some(user_peer.clone())
+            ));
+            let dm_peer = proto::Peer {
+                r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+            };
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    get_chat.id,
+                    proto::rpc_result::Result::GetChat(proto::GetChatResult {
+                        chat: Some(proto::Chat {
+                            id: 7,
+                            peer_id: Some(dm_peer.clone()),
+                            ..Default::default()
+                        }),
+                        dialog: Some(proto::Dialog {
+                            peer: Some(dm_peer),
+                            chat_id: Some(7),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await;
+        });
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+        let updates = vec![proto::Update {
+            seq: Some(1),
+            date: Some(10),
+            update: Some(proto::update::Update::DeleteMessages(
+                proto::UpdateDeleteMessages {
+                    message_ids: vec![11],
+                    peer_id: Some(proto::Peer {
+                        r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+                    }),
+                },
+            )),
+        }];
+
+        let events = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            backend.apply_updates(updates, None, None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        server.await.unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::MessageDeleted { chat_id, message_id }
+                if *chat_id == InlineId::new(7) && *message_id == InlineId::new(11)
+        )));
+        let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
+        assert_eq!(dialog.peer_user_id, Some(InlineId::new(42)));
     }
 
     #[tokio::test]

@@ -247,6 +247,24 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         })
     }
 
+    /// Reads one chat from the source without changing local state. `None`
+    /// when the chat is gone or not visible to this account.
+    ///
+    /// The server's GetChat behind it creates this account's dialog for the
+    /// chat when there is none (as the full chat catalog does for every chat),
+    /// so the chat can show up in the account's list afterwards.
+    fn fetch_dialog(
+        &self,
+        _chat_id: InlineId,
+    ) -> BoxFuture<'static, BackendResult<Option<DialogRecord>>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "single chat lookup is unsupported",
+            ))
+        })
+    }
+
     /// Fetches public source profiles by a bounded set of known IDs.
     fn users(
         &self,

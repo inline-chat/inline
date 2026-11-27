@@ -142,6 +142,10 @@ pub enum InitialEventPolicy {
     /// Seed the exact durable cursor without exposing pre-seed history. Once a
     /// cursor exists, reconnects resume normally and never suppress new work.
     StartAfterCurrent,
+    /// Like `StartAfterCurrent`, but takes the server's current position
+    /// without reading the history at all. The store starts with no chats,
+    /// users or dialogs; the host fetches what it needs on demand.
+    StartAtCurrentPosition,
 }
 
 impl ConnectRequest {
@@ -164,6 +168,13 @@ impl ConnectRequest {
     /// enabling event delivery.
     pub fn start_after_current(mut self) -> Self {
         self.initial_event_policy = InitialEventPolicy::StartAfterCurrent;
+        self
+    }
+
+    /// Starts a brand-new store at the server's current position without
+    /// reading existing history (see `InitialEventPolicy::StartAtCurrentPosition`).
+    pub fn start_at_current_position(mut self) -> Self {
+        self.initial_event_policy = InitialEventPolicy::StartAtCurrentPosition;
         self
     }
 }

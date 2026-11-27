@@ -265,6 +265,45 @@ impl SyncManager {
         Ok(events)
     }
 
+    /// Starts an unseeded store at the server's current position: the user
+    /// bucket cursor becomes the server's current seq and discovery continues
+    /// from now, without replaying (or repairing through the chat catalog) the
+    /// history a start-after-current client would discard anyway. Returns false
+    /// when the server reports no seq, so the caller runs a full discovery.
+    pub(crate) async fn seed_current<H: SyncHost>(&self, host: &H) -> BackendResult<bool> {
+        let _operation_guard = self.sync_operation_lock.lock().await;
+        let result = host.get_updates_state(None).await?;
+        // Live updates captured before this checkpoint are history too.
+        self.state_preceding_updates.lock().await.clear();
+        let Some(seq) = result.seq.filter(|seq| *seq >= 0) else {
+            return Ok(false);
+        };
+        {
+            let _write = host.local_write_lease().await?;
+            let bucket_lock = self.bucket_lock(SyncBucketKey::User).await;
+            let _bucket_guard = bucket_lock.lock().await;
+            let current = self
+                .store
+                .sync_bucket_state(SyncBucketKey::User)
+                .await
+                .map_err(store_error_to_backend)?;
+            if current.seq < i64::from(seq) {
+                self.store
+                    .save_sync_bucket_state(
+                        SyncBucketKey::User,
+                        SyncBucketState {
+                            seq: i64::from(seq),
+                            date: current.date.max(result.date),
+                        },
+                    )
+                    .await
+                    .map_err(store_error_to_backend)?;
+            }
+        }
+        self.update_last_sync_date(result.date).await?;
+        Ok(true)
+    }
+
     pub(crate) async fn process_realtime<H: SyncHost>(
         &self,
         host: &H,
@@ -1849,6 +1888,45 @@ mod tests {
                 .and_then(|bucket| bucket.r#type.as_ref()),
             Some(proto::update_bucket::Type::User(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn seeding_at_the_current_position_reads_no_history() {
+        let store = Arc::new(InMemoryStore::new());
+        let mut host = FakeHost::new(Vec::new());
+        host.state.seq = Some(40_000);
+        host.state.date = 1_000;
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        assert!(sync.seed_current(&host).await.unwrap());
+
+        assert_eq!(*host.state_requests.lock().await, vec![None]);
+        assert!(host.requests.lock().await.is_empty());
+        assert!(host.repaired_buckets.lock().await.is_empty());
+        let user = store.sync_bucket_state(SyncBucketKey::User).await.unwrap();
+        assert_eq!(
+            user,
+            SyncBucketState {
+                seq: 40_000,
+                date: 1_000
+            }
+        );
+        let state = store.sync_state().await.unwrap();
+        assert_eq!(
+            state.last_sync_date,
+            1_000 - SyncConfig::default().last_sync_safety_gap_seconds
+        );
+    }
+
+    #[tokio::test]
+    async fn seeding_falls_back_when_the_server_reports_no_position() {
+        let store = Arc::new(InMemoryStore::new());
+        let host = FakeHost::new(Vec::new());
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        assert!(!sync.seed_current(&host).await.unwrap());
+        let user = store.sync_bucket_state(SyncBucketKey::User).await.unwrap();
+        assert_eq!(user.seq, 0);
     }
 
     #[tokio::test]
