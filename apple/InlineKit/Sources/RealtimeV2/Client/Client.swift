@@ -67,8 +67,28 @@ actor ProtocolSession: ProtocolSessionType {
 
   func start() {
     guard listenerTask == nil else { return }
-    listenerTask = Task { [weak self] in
+    listenerTask = Task { [weak self, transport] in
+      await transport.setTransferReplyHandler { [weak self] message in
+        await self?.takeTransferReply(message) ?? false
+      }
       await self?.startListeners()
+    }
+  }
+
+  /// Completes a direct transfer call (upload part, file range) without the ordered account-event
+  /// pass: no transaction owns these replies, and that pass may be applying a catch-up.
+  private func takeTransferReply(_ message: ServerProtocolMessage) -> Bool {
+    switch message.body {
+    case let .rpcResult(result):
+      guard rpcContinuations[result.reqMsgID] != nil else { return false }
+      completeRpcResult(msgId: result.reqMsgID, rpcResult: result.result)
+      return true
+    case let .rpcError(error):
+      guard rpcContinuations[error.reqMsgID] != nil else { return false }
+      completeRpcError(msgId: error.reqMsgID, rpcError: error)
+      return true
+    default:
+      return false
     }
   }
 

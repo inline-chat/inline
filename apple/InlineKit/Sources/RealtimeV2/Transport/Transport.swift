@@ -63,9 +63,19 @@ public protocol Transport: Sendable {
   /// send preparing its file), so the first part doesn't wait for a handshake. Best effort: it
   /// never throws, does nothing while disconnected, and an unused path closes on its idle timer.
   func prewarmTransfer() async
+
+  /// Takes transfer RPC replies (upload acknowledgements, file ranges) the moment they arrive.
+  /// On `events` they would wait for every earlier event, and that consumer applies chat updates
+  /// in order, so a part could wait behind a whole catch-up. The handler returns false for a
+  /// reply it doesn't own; the transport then delivers it on `events` as before.
+  func setTransferReplyHandler(_ handler: TransferReplyHandler?) async
 }
+
+/// See `Transport.setTransferReplyHandler`.
+public typealias TransferReplyHandler = @Sendable (ServerProtocolMessage) async -> Bool
 
 public extension Transport {
   func isApplicationAuthenticatedOnConnect() async -> Bool { false }
   func prewarmTransfer() async {}
+  func setTransferReplyHandler(_ handler: TransferReplyHandler?) async {}
 }

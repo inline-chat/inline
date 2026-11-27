@@ -71,6 +71,7 @@ public actor InlineProtocolV3Transport: Transport {
   private let rsaPublicKeys: [InlineProtocolRSAPublicKey]
   private let localDebugTrustHost: String?
   private let channel = AsyncChannel<TransportEvent>()
+  private var transferReplyHandler: TransferReplyHandler?
   private var connection: InlineProtocolV3Connection?
   private var connectionAuthority: AuthInvalidationReceipt?
   private var updatesTask: Task<Void, Never>?
@@ -487,6 +488,10 @@ public actor InlineProtocolV3Transport: Transport {
   /// Opens the transfer connection now, so a coming upload's first RPC finds it ready instead of
   /// paying its handshake (a fresh temporary key: about seven round trips). Holding it only until it
   /// is open leaves it idle, so the usual idle timer closes it if no upload follows.
+  public func setTransferReplyHandler(_ handler: TransferReplyHandler?) async {
+    transferReplyHandler = handler
+  }
+
   public func prewarmTransfer() async {
     guard let connection, let connectionAuthority, auth.isCurrent(connectionAuthority) else { return }
     // An open one is left alone: the server times it out from its last request, so restarting our
@@ -583,7 +588,12 @@ public actor InlineProtocolV3Transport: Transport {
         await source.close()
         return
       }
-      await channel.send(.message(server))
+      let taken = if InlineProtocolTransferMethods.methods.contains(method), let transferReplyHandler {
+        await transferReplyHandler(server)
+      } else {
+        false
+      }
+      if !taken { await channel.send(.message(server)) }
       log.debug(
         "RPC completed rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds)"
       )
@@ -1033,6 +1043,7 @@ public actor NegotiatingRealtimeTransport: Transport {
   private enum State { case idle, starting, connected, disconnected, switching, stopping }
 
   private let log = Log.scoped("Realtime.TransportSelection")
+  private var transferReplyHandler: TransferReplyHandler?
   private let hasInlineProtocolCredentials: @Sendable () -> Bool
   private let hasLegacyCredentials: @Sendable () -> Bool
   private let makeLegacyTransport: TransportFactory
@@ -1158,12 +1169,21 @@ public actor NegotiatingRealtimeTransport: Transport {
     await active.prewarmTransfer()
   }
 
+  public func setTransferReplyHandler(_ handler: TransferReplyHandler?) async {
+    transferReplyHandler = handler
+    await active?.setTransferReplyHandler(handler)
+  }
+
   private func install(_ kind: Kind) {
     let transport: any Transport = kind == .inlineProtocol
       ? makeInlineProtocolTransport() : makeLegacyTransport()
     log.debug(kind == .inlineProtocol ? "Selected Inline Protocol transport" : "Selected legacy Realtime V2 transport")
     active = transport
     activeKind = kind
+    if let transferReplyHandler {
+      // Until this lands, replies still arrive on `events`.
+      Task { await transport.setTransferReplyHandler(transferReplyHandler) }
+    }
     generation &+= 1
     let current = generation
     eventTask = Task { [weak self] in

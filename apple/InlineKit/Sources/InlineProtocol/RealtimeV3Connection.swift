@@ -351,7 +351,7 @@ public actor InlineProtocolV3Connection {
     var sequence: Int32
     let body: [UInt8]
     let completion: PreparedCompletion
-    let timeoutTask: Task<Void, Never>?
+    var timeoutTask: Task<Void, Never>?
     var acknowledgement: PreparedAcknowledgement?
   }
 
@@ -377,7 +377,12 @@ public actor InlineProtocolV3Connection {
   /// after this delay or once this many are pending.
   private static let acknowledgementFlushDelay: Duration = .seconds(30)
   private static let acknowledgementFlushCount = 16
+  /// How long a request may wait for its response once its bytes are written. Time in the
+  /// outbound queue does not count: on a slow link a part can wait there behind earlier parts.
   private static let applicationRequestTimeout: Duration = .seconds(45)
+  /// A request that times out closes the connection only when nothing arrived for this long;
+  /// otherwise the connection is alive and only that request fails.
+  private static let silentConnectionWindow: Duration = .seconds(20)
   private static let temporaryKeyLifetimeMilliseconds: Int64 = 86_400_000
   private static let temporaryKeyRotationMilliseconds: Int64 = temporaryKeyLifetimeMilliseconds * 4 / 5
 
@@ -391,6 +396,7 @@ public actor InlineProtocolV3Connection {
   private var lastMessageID: Int64 = 0
   private let serverClock: InlineProtocolServerClockOffset
   private var contentCount: Int32 = 0
+  private var lastInboundAt: ContinuousClock.Instant?
   private var serverUnixMilliseconds: Int64
   private var monotonicAnchor: TimeInterval
   private nonisolated let updatePipe = InlineProtocolUpdatePipe()
@@ -854,20 +860,12 @@ public actor InlineProtocolV3Connection {
     guard pendingRequests[messageID] == nil else {
       throw InlineProtocolV3ConnectionError.protocolFailure
     }
-    let timeoutTask = Task { [weak self] in
-      do {
-        try await Task.sleep(for: Self.applicationRequestTimeout)
-      } catch {
-        return
-      }
-      await self?.requestTimedOut(requestToken: requestToken)
-    }
     pendingRequests[messageID] = PendingRequest(
       requestToken: requestToken,
       sequence: sequence,
       body: body,
       completion: completion,
-      timeoutTask: timeoutTask,
+      timeoutTask: nil,
       acknowledgement: acknowledged
     )
     do {
@@ -878,6 +876,18 @@ public actor InlineProtocolV3Connection {
       guard let pending = pendingRequests.removeValue(forKey: messageID) else { return }
       pending.timeoutTask?.cancel()
       throw error
+    }
+    // The response may already have arrived; a resend under a new ID keeps the same token.
+    guard let entry = pendingRequests.first(where: { $0.value.requestToken == requestToken }),
+          entry.value.timeoutTask == nil
+    else { return }
+    pendingRequests[entry.key]?.timeoutTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: Self.applicationRequestTimeout)
+      } catch {
+        return
+      }
+      await self?.requestTimedOut(requestToken: requestToken)
     }
   }
 
@@ -1130,6 +1140,11 @@ public actor InlineProtocolV3Connection {
     let pending = pendingRequests.removeValue(forKey: entry.key)!
     pending.timeoutTask?.cancel()
     deliver(pending, .failure(InlineProtocolV3ConnectionError.timeout))
+    if let lastInboundAt, ContinuousClock.now - lastInboundAt < Self.silentConnectionWindow {
+      // The server is still talking on this connection; other requests keep their chance.
+      log.warning("V3 request timed out on a live connection")
+      return
+    }
     await terminate(with: InlineProtocolV3ConnectionError.timeout, closeCode: .goingAway)
   }
 
@@ -1194,6 +1209,7 @@ public actor InlineProtocolV3Connection {
       nowSeconds: serverNowMilliseconds() / 1_000
     )
     sample(messageID: fields.messageID)
+    lastInboundAt = .now
     return fields
   }
 
