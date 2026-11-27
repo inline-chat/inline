@@ -342,6 +342,68 @@ struct LongParagraphBreaker {
 }
 
 public enum TextLayouter {
+  /// Texts this long keep their typesetter between layouts (`typesetting`).
+  static let cachedTypesetterLength = 2_000
+  static let cachedTypesetterCount = 12
+
+  /// Immutable; Core Text's typesetter is read-only once made.
+  private final class TypesetterEntry: @unchecked Sendable {
+    let typesetString: NSAttributedString
+    let typesetter: CTTypesetter
+    init(typesetString: NSAttributedString, typesetter: CTTypesetter) {
+      self.typesetString = typesetString
+      self.typesetter = typesetter
+    }
+  }
+
+  private struct TypesetterKey: Hashable {
+    let text: MessageText
+    let style: TextLayoutStyle
+  }
+
+  private struct TypesetterCache {
+    var entries: [TypesetterKey: TypesetterEntry] = [:]
+    /// Newest last.
+    var order: [TypesetterKey] = []
+  }
+
+  private static let typesetters = Mutex(TypesetterCache())
+  private static let typesetterCounts = Mutex((made: 0, reused: 0))
+  /// Typesetters made and reused for long texts since launch (diagnostics for the Mac journey harness).
+  public static var typesetterStats: (made: Int, reused: Int) { typesetterCounts.withLock { $0 } }
+
+  /// The string Core Text shapes (with base directions) and its typesetter. A long text keeps both, by its content
+  /// and style, for its next layout at another width: shaping is most of a layout's cost (an 80k-character message
+  /// was ~85% typesetter creation, ~15% line breaking per width), and a live resize lays text out at every step.
+  /// Keyed by content, not by string object: callers build a new string for the same text.
+  private static func typesetting(
+    _ text: MessageText, string: NSString, style: TextLayoutStyle, isLong: Bool
+  ) -> (NSAttributedString, CTTypesetter) {
+    let attributed = text.attributedString
+    let caches = attributed.length >= cachedTypesetterLength
+    let key = TypesetterKey(text: text, style: style)
+    if caches, let entry = typesetters.withLock({ $0.entries[key] }) {
+      typesetterCounts.withLock { $0.reused += 1 }
+      return (entry.typesetString, entry.typesetter)
+    }
+    if caches { typesetterCounts.withLock { $0.made += 1 } }
+    let typesetString = withBaseDirections(attributed, string: string, style: style)
+    let typesetter = isLong
+      ? makeTypesetter(typesetString)
+      : CTTypesetterCreateWithAttributedString(typesetString as CFAttributedString)
+    if caches {
+      let entry = TypesetterEntry(typesetString: typesetString, typesetter: typesetter)
+      typesetters.withLock { cache in
+        if cache.entries.updateValue(entry, forKey: key) != nil { cache.order.removeAll { $0 == key } }
+        cache.order.append(key)
+        while cache.order.count > cachedTypesetterCount {
+          cache.entries[cache.order.removeFirst()] = nil
+        }
+      }
+    }
+    return (typesetString, typesetter)
+  }
+
   /// Breaks `text` into lines no wider than `maximumWidth`.
   public static func layout(
     _ text: MessageText,
@@ -357,15 +419,12 @@ public enum TextLayouter {
     }
 
     let string = attributed.string as NSString
-    let typesetString = withBaseDirections(attributed, string: string, style: style)
     // Past Core Text's work limit (10,000 UTF-16 on macOS 27, measured) the default typesetter
     // stops shaping the whole text: no kerning or ligatures, Arabic-script letters don't join,
     // and right-to-left lines break short. Long texts get an unbounded typesetter for their
     // lines and windows for their breaks, which keeps both linear.
     let isLong = length > LongParagraphBreaker.longTextLength
-    let typesetter = isLong
-      ? makeTypesetter(typesetString)
-      : CTTypesetterCreateWithAttributedString(typesetString as CFAttributedString)
+    let (typesetString, typesetter) = typesetting(text, string: string, style: style, isLong: isLong)
     var breaker = LongParagraphBreaker(text: typesetString)
     var paragraphEnd = 0
     var lines: [TextLayout.Line] = []
