@@ -327,6 +327,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       self, selector: #selector(applicationDidBecomeActive), name: UIApplication.didBecomeActiveNotification,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(applicationDidEnterBackground), name: UIApplication.didEnterBackgroundNotification,
+      object: nil
+    )
     // The actions button follows the hold action, and VoiceOver picks UIKit's menu.
     INUserSettings.current.messageGestures.objectWillChange
       .receive(on: DispatchQueue.main)
@@ -1051,6 +1055,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     list.apply(TimelineTransaction(rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll))
     if case .to = scroll, !list.layout.isAtBottom { holdsOpeningPlace = true }
+    #if DEBUG
+    let top = topRowPlace().flatMap { place in Self.chatMessage(row(place.id)).map { ($0.message.messageId, place.offset) } }
+    debugLog("TIMELINE_DEBUG opened anchor=\(openAnchor) top=\(top.map { "\($0.0)@\(Int($0.1))" } ?? "-") window=\(viewModel.oldestLoadedMessageId ?? -1)...\(viewModel.newestLoadedMessageId ?? -1)")
+    #endif
     readPass(force: true)
     warmMedia()
     offerForTranslation(snapshot.ids)
@@ -1897,6 +1905,14 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     readPass(force: true)
   }
 
+  /// The system may end the app from the background without the chat ever leaving the screen, so
+  /// the place is saved here too, as Telegram saves its scroll state: a jump that ended without a
+  /// scroll (a reply, a pin, a search result) has saved nothing yet.
+  @objc private func applicationDidEnterBackground() {
+    guard window != nil else { return }
+    saveReadingPlace()
+  }
+
   private func visibleMessages() -> [FullMessage] {
     guard let snapshot else { return [] }
     // Every item of an album on screen is seen.
@@ -2016,11 +2032,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func saveReadingPlace() {
     guard !isPreview, hasOpened, let snapshot else { return }
     defer { ChatOpenPreparation.shared.discard(peer: peer) }
-    // The newest message on screen at all: there is no place to keep, as the collection view decided.
-    if !viewModel.canLoadNewerFromLocal,
+    // The chat's newest message on screen at all: there is no place to keep. The window's newest row
+    // is not enough: past a jump's window, or at the edge of history paged in, newer history is still
+    // unknown, and Telegram keeps the place there too (`laterId != nil`).
+    if viewModel.historyCoverage.isAtCertifiedLiveEnd,
        let newest = snapshot.rows.last(where: { $0.content.message != nil })?.id,
        list.layout.visible.contains(where: { $0.id == newest })
     {
+      #if DEBUG
+      debugLog("TIMELINE_DEBUG place cleared: the chat's newest message is on screen")
+      #endif
       ChatReadingPlaceStore.shared.clear(for: peer)
       return
     }
@@ -2028,6 +2049,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     for placement in list.layout.visible {
       guard let messageId = Self.chatMessage(snapshot.row(for: placement.id))?.message.messageId, messageId > 0,
             placement.y >= top - 0.5 || placement.id == list.layout.visible.last?.id else { continue }
+      #if DEBUG
+      debugLog("TIMELINE_DEBUG place saved \(messageId)@\(Int(placement.y - top))")
+      #endif
       ChatReadingPlaceStore.shared.save(ChatReadingPlace(messageId: messageId, offset: placement.y - top), for: peer)
       return
     }

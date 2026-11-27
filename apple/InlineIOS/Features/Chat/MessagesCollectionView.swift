@@ -4721,7 +4721,8 @@ private extension MessagesCollectionView {
 
     /// The newest cached message is in the window and on screen, so there is no place to keep.
     func showsNewestMessage(in collectionView: UICollectionView) -> Bool {
-      guard !viewModel.canLoadNewerFromLocal else { return false }
+      // The chat's newest, not the window's: newer history past a hole keeps the place.
+      guard viewModel.historyCoverage.isAtCertifiedLiveEnd else { return false }
       let newest = IndexPath(item: 0, section: newestMessageSectionIndex(in: listSections.map(\.id)))
       guard case .message? = item(at: newest),
             collectionView.numberOfSections > 0,

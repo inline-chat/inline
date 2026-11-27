@@ -22,6 +22,9 @@ import UIKit
 /// - `--timeline-harness-hold-action reply|toggleAck|...` stands in for the user's hold action
 ///   (never stored), which shows the rows' actions button.
 /// - `--timeline-harness-system-menu` stands in for VoiceOver: the list uses UIKit's menu.
+/// - `--timeline-harness-stray-row` leaves history known only from just under the saved place up, with
+///   one stray row cached across the hole below it, as paging back over a reply's quoted message does.
+///   `--timeline-harness-rows-after N` also ends the known history N rows after it, as a jump's window.
 /// - `--timeline-harness-focus ID` asks for a message as the chat opens.
 /// - `--timeline-harness-dense` sends the fixture's messages 45 s apart in runs of 12, so long sender groups form.
 /// - `--timeline-harness-preview` shows the chat as the chat list's preview does (no composer, no touches).
@@ -141,6 +144,11 @@ final class TimelineHarnessModel {
             )
           }
         }
+      }
+      if arguments.contains("--timeline-harness-stray-row") {
+        try fixture.strandSavedPlace(
+          rowsAfter: TimelineHarnessRootView.argument("--timeline-harness-rows-after").flatMap(Int64.init)
+        )
       }
       initialState = try await fixture.initialState(for: opening)
       self.fixture = fixture
