@@ -59,6 +59,13 @@ public struct TimelinePlacement<ID: Hashable & Sendable>: Equatable, Sendable {
   public var y: CGFloat
   public var height: CGFloat
 
+  public init(id: ID, index: Int, y: CGFloat, height: CGFloat) {
+    self.id = id
+    self.index = index
+    self.y = y
+    self.height = height
+  }
+
   public var maxY: CGFloat { y + height }
 }
 

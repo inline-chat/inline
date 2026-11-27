@@ -209,13 +209,15 @@ private func checkInvariants(_ layout: TimelineLayout<Int>, rows: [Int], sourceL
 
   @Test func `deleting the reading row hands its place to the next row`() {
     var fixture = Fixture()
+    // The Mac list's rule (the default is the lowest visible row, iOS's).
+    fixture.state.readingAnchor = .lowestShowing(44)
     fixture.apply(.init(rows: Array(0 ..< 100), scroll: .to(50, .top(0))))
     guard case let .row(reading, top) = fixture.state.layout.position else {
       Issue.record("expected a reading row")
       return
     }
-    // The lowest visible row: its top is above the usable bottom, its bottom at or below it.
-    #expect(top < 540 && top + 50 >= 540)
+    // The lowest row showing at least min(its height, 44 pt); the row below it shows less.
+    #expect(540 - top >= 44 - 0.5 && 540 - (top + 50) < 44)
     let nextY = fixture.y(reading + 1)
     var rows = Array(0 ..< 100)
     rows.removeAll { $0 == reading }
@@ -459,5 +461,81 @@ private extension Comparable {
     fixture.apply(.init(viewport: portrait))
     #expect(fixture.state.layout.position == scrolled)
     checkInvariants(fixture.state.layout, rows: rows)
+  }
+}
+
+@Suite("Reading anchor")
+struct ReadingAnchorTests {
+  let viewport = TimelineViewport(width: 320, height: 600, topInset: 0, bottomInset: 60)
+
+  /// Rows of 50 pt with the last one showing `sliver` above the usable bottom (540).
+  private func placements(sliver: CGFloat) -> [TimelinePlacement<Int>] {
+    (0 ..< 12).map { TimelinePlacement(id: $0, index: $0, y: 540 - sliver - CGFloat(11 - $0) * 50, height: 50) }
+  }
+
+  @Test func `lowest visible takes a sliver, the 44 pt rule the row above it`() {
+    let rows = placements(sliver: 10)
+    #expect(TimelineReadingAnchor.lowestVisible.row(in: rows, viewport: viewport)?.id == 11)
+    #expect(TimelineReadingAnchor.lowestShowing(44).row(in: rows, viewport: viewport)?.id == 10)
+    #expect(TimelineReadingAnchor.lowestShowingHalf.row(in: rows, viewport: viewport)?.id == 10)
+  }
+
+  @Test func `a row showing 44 pt or more is the anchor under the 44 pt rule`() {
+    let rows = placements(sliver: 44)
+    #expect(TimelineReadingAnchor.lowestShowing(44).row(in: rows, viewport: viewport)?.id == 11)
+    // Half of 50 is 25: 30 pt showing is enough for "half", not for 44 pt.
+    let thirty = placements(sliver: 30)
+    #expect(TimelineReadingAnchor.lowestShowingHalf.row(in: thirty, viewport: viewport)?.id == 11)
+    #expect(TimelineReadingAnchor.lowestShowing(44).row(in: thirty, viewport: viewport)?.id == 10)
+  }
+
+  @Test func `a row shorter than 44 pt counts when wholly shown`() {
+    var rows = placements(sliver: 30)
+    rows[11] = TimelinePlacement(id: 11, index: 11, y: 510, height: 30)
+    #expect(TimelineReadingAnchor.lowestShowing(44).row(in: rows, viewport: viewport)?.id == 11)
+  }
+}
+
+@Suite("Top-edge spans")
+struct TopSpanTests {
+  @Test func `the topmost visible row's span start stays placed, far above the screen`() {
+    // Rows of 50 pt; rows 10…29 are one span whose first row (10) holds a top pin.
+    var state = TimelineState<Int>(
+      viewport: TimelineViewport(width: 320, height: 600, topInset: 50, bottomInset: 60),
+      margins: TimelineMargins(above: 100, below: 100)
+    )
+    let spanStart: (Int) -> Int? = { (11 ... 29).contains($0) ? 10 : nil }
+    // Row 25 at the usable top: row 10 is 750 pt above it, well beyond the 100 pt margin.
+    state.apply(.init(rows: Array(0 ..< 60), scroll: .to(25, .top(0))), spanStart: spanStart) { _ in 50 }
+    let placed = state.layout.placements.map(\.id)
+    #expect(placed.contains(10))
+    #expect(placed == Array(placed.first! ... placed.last!))
+    // Without the span, rows that far above go.
+    var plain = TimelineState<Int>(
+      viewport: TimelineViewport(width: 320, height: 600, topInset: 50, bottomInset: 60),
+      margins: TimelineMargins(above: 100, below: 100)
+    )
+    plain.apply(.init(rows: Array(0 ..< 60), scroll: .to(25, .top(0)))) { _ in 50 }
+    #expect(!plain.layout.placements.map(\.id).contains(10))
+  }
+}
+
+@Suite("Passage through width changes")
+struct PassageTests {
+  @Test func `a passage inside a row taller than the screen stays at the usable top through width steps`() {
+    // Row 20 is text whose height goes as 1 / width (2,000 pt at 320); a point in it maps by the same ratio.
+    var width: CGFloat = 320
+    func height(_ id: Int) -> CGFloat { id == 20 ? 2000 * 320 / width : 50 }
+    let passage: (Int, CGFloat, CGFloat, CGFloat) -> CGFloat = { _, offset, from, to in offset * from / to }
+    var state = TimelineState<Int>(viewport: TimelineViewport(width: width, height: 600, topInset: 50, bottomInset: 60))
+    state.apply(.init(rows: Array(0 ..< 40), scroll: .to(20, .top(-700))), passage: passage) { height($0) }
+    // The passage at the usable top: 700 pt into the row at width 320, a share of 700 / 2000 of its text.
+    for step: CGFloat in [300, 260, 240, 280, 360, 420, 320] {
+      width = step
+      state.apply(.init(viewport: TimelineViewport(width: width, height: 600, topInset: 50, bottomInset: 60)), passage: passage) { height($0) }
+      guard let row = state.layout.placement(for: 20) else { Issue.record("row 20 placed"); return }
+      let share = (50 - row.y) / row.height
+      #expect(abs(share - 0.35) < 0.0001, "width \(width): share \(share)")
+    }
   }
 }

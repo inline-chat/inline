@@ -148,6 +148,16 @@ public struct ScrollPath: Equatable, Sendable {
   public let touchesLower: Bool
   public let touchesUpper: Bool
 
+  /// A path from samples taken every `interval` seconds, starting at 0 (displacements as `TimelineScroll.by`).
+  public init(interval: Double, positions: [Double], velocities: [Double], touchesLower: Bool, touchesUpper: Bool) {
+    precondition(!positions.isEmpty && positions.count == velocities.count)
+    self.interval = interval
+    self.positions = positions
+    self.velocities = velocities
+    self.touchesLower = touchesLower
+    self.touchesUpper = touchesUpper
+  }
+
   public var duration: Double { Double(positions.count - 1) * interval }
   public var end: Double { positions[positions.count - 1] }
 

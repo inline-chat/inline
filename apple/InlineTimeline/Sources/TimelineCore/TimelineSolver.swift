@@ -5,12 +5,14 @@ import CoreGraphics
 public enum TimelineSolver {
   public static func layout<ID: Hashable & Sendable>(
     rows: [ID],
-    index: [ID: Int],
+    index: TimelineRowIndex<ID>,
     viewport: TimelineViewport,
     position: TimelinePosition<ID>,
     margins: TimelineMargins = .standard,
     allowsOverscroll: Bool = false,
+    readingAnchor: TimelineReadingAnchor = .lowestVisible,
     spanEnd: (ID) -> ID? = { _ in nil },
+    spanStart: (ID) -> ID? = { _ in nil },
     height: (ID) -> CGFloat
   ) -> TimelineLayout<ID> {
     guard !rows.isEmpty else { return .empty(viewport: viewport) }
@@ -80,7 +82,31 @@ public enum TimelineSolver {
       // The end is already placed: keep it.
       keepThrough = endIndex
     }
-    while placements.count > 1, placements[0].maxY < -margins.above { placements.removeFirst() }
+    // The same for a span whose pin keeps to the top (held by its first row): the topmost visible row's span start
+    // stays placed, so its pin is there while any of the span shows.
+    var keepFrom = Int.max
+    if let visible = placements.first(where: { $0.y < viewport.usableBottom && $0.maxY > viewport.usableTop }),
+       let start = spanStart(visible.id), let startIndex = index[start], startIndex < visible.index, let first = placements.first
+    {
+      if first.index > startIndex {
+        var extra: [TimelinePlacement<ID>] = []
+        var y = first.y
+        var previous = first.index - 1
+        while previous >= startIndex, y > -margins.span {
+          let rowHeight = max(0, height(rows[previous]))
+          y -= rowHeight
+          extra.append(TimelinePlacement(id: rows[previous], index: previous, y: y, height: rowHeight))
+          previous -= 1
+        }
+        if previous < startIndex {
+          placements = extra.reversed() + placements
+          keepFrom = startIndex
+        }
+      } else {
+        keepFrom = startIndex
+      }
+    }
+    while placements.count > 1, placements[0].maxY < -margins.above, placements[0].index < keepFrom { placements.removeFirst() }
     while placements.count > 1, placements[placements.count - 1].y > viewport.height + margins.below,
           placements[placements.count - 1].index > keepThrough
     {
@@ -94,9 +120,9 @@ public enum TimelineSolver {
     var resolved: TimelinePosition<ID> = position
     if isPinned, abs(restShift) <= 0.001 || allowsOverscroll {
       resolved = .latest
-    } else if let visible = placements.last(where: { $0.y < viewport.usableBottom }) {
-      // The reading row is the lowest visible one: what is newest on screen stays put when rows
-      // above it arrive, leave or change height.
+    } else if let visible = readingAnchor.row(in: placements, viewport: viewport) {
+      // The reading row (by default the lowest visible one): what is newest on screen stays put when
+      // rows above it arrive, leave or change height.
       resolved = .row(visible.id, top: visible.y)
     }
 
@@ -169,6 +195,31 @@ public enum TimelineSolver {
     mutating func shift(by delta: CGFloat) {
       for index in above.indices { above[index].y += delta }
       for index in below.indices { below[index].y += delta }
+    }
+  }
+}
+
+/// Which row a layout anchors on when it is not pinned: what stays put when rows above it change.
+public enum TimelineReadingAnchor: Equatable, Sendable {
+  /// The lowest row with any part above the usable bottom, a sliver included.
+  case lowestVisible
+  /// The lowest row showing at least `min(its height, points)` in the usable area.
+  case lowestShowing(CGFloat)
+  /// The lowest row showing at least half of itself.
+  case lowestShowingHalf
+
+  func row<ID: Hashable & Sendable>(in placements: [TimelinePlacement<ID>], viewport: TimelineViewport) -> TimelinePlacement<ID>? {
+    let lowest = placements.last(where: { $0.y < viewport.usableBottom })
+    func shown(_ p: TimelinePlacement<ID>) -> CGFloat {
+      min(p.maxY, viewport.usableBottom) - max(p.y, viewport.usableTop)
+    }
+    switch self {
+      case .lowestVisible:
+        return lowest
+      case let .lowestShowing(points):
+        return placements.last(where: { $0.y < viewport.usableBottom && shown($0) >= min($0.height, points) - 0.5 }) ?? lowest
+      case .lowestShowingHalf:
+        return placements.last(where: { $0.y < viewport.usableBottom && shown($0) >= $0.height / 2 - 0.5 }) ?? lowest
     }
   }
 }

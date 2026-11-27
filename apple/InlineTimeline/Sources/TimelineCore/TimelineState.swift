@@ -88,16 +88,26 @@ public struct TimelineChange<ID: Hashable & Sendable>: Sendable {
 /// The timeline's state and its single way to change.
 public struct TimelineState<ID: Hashable & Sendable>: Sendable {
   public private(set) var rows: [ID] = []
-  public private(set) var index: [ID: Int] = [:]
+  public private(set) var index = TimelineRowIndex<ID>()
   public private(set) var coverage = TimelineCoverage()
   public private(set) var layout: TimelineLayout<ID>
   public var margins: TimelineMargins
   /// Rows from a loaded end at which more history is asked for.
   public var demandThreshold = 12
+  /// The row a layout anchors on when not pinned. The default is the lowest visible row, as the iOS list has always
+  /// used. The Mac list sets the lowest row showing at least min(its height, 44 pt) (`TimelineListView` in
+  /// TimelineAppKit): with a sliver as the anchor, the row being read just above it moved up by all it grew (48–80 pt
+  /// for an edit or a stream, update lab `update.readingAnchorAB`, slivers of 5–43 pt); with 44 pt it holds (0 pt), and
+  /// rows below it still grow downward (bottom-first). iOS can take the same rule once it's checked there.
+  public var readingAnchor: TimelineReadingAnchor = .lowestVisible
   /// The reading row when the view's size started changing, kept through size changes until the reader
   /// scrolls. A new width rewraps rows, so the lowest visible row can become another one; following that
   /// row back brought a rotation and back 58 pt off the place it left.
   private var sizeAnchor: ID?
+  /// The passage being read inside a message taller than the screen when the width started changing: its row, its
+  /// offset in the row and the width it was read at. Each step maps from there (re-reading it from the last step lost
+  /// up to a line per step as text rewrapped: 336 pt over a live resize in the lab), until the reader scrolls.
+  private var passageAnchor: (id: ID, offset: CGFloat, width: CGFloat)?
 
   public init(viewport: TimelineViewport, margins: TimelineMargins = .standard) {
     layout = .empty(viewport: viewport)
@@ -109,7 +119,9 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
 
   @discardableResult
   public mutating func apply(
-    _ update: TimelineUpdate<ID>, spanEnd: (ID) -> ID? = { _ in nil }, height: (ID) -> CGFloat
+    _ update: TimelineUpdate<ID>, spanEnd: (ID) -> ID? = { _ in nil }, spanStart: (ID) -> ID? = { _ in nil },
+    passage: ((ID, CGFloat, CGFloat, CGFloat) -> CGFloat)? = nil,
+    height: (ID) -> CGFloat
   ) -> TimelineChange<ID> {
     let previous = layout
     let previousIndex = index
@@ -118,7 +130,7 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
 
     if let newRows = update.rows {
       rows = newRows
-      index = Dictionary(uniqueKeysWithValues: newRows.enumerated().map { ($0.element, $0.offset) })
+      index.update(newRows)
       position = Self.survivingPosition(position, previous: previous, index: index)
     }
     if let newCoverage = update.coverage { coverage = newCoverage }
@@ -134,17 +146,39 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
     }
 
     let viewport = update.viewport ?? previous.viewport
-    if update.scroll != .preserve { sizeAnchor = nil }
+    if update.scroll != .preserve {
+      sizeAnchor = nil
+      passageAnchor = nil
+    }
     let resized = abs(viewport.width - previous.viewport.width) > 0.01
       || abs(viewport.height - previous.viewport.height) > 0.01
-    if resized, update.scroll == .preserve, case let .row(id, _) = position {
+    // A new width inside a message taller than the screen (Mo, 2026-09-26: "preserving a row's pixel offset does not
+    // necessarily preserve the passage being read inside a huge message"): the passage at the usable top stays there,
+    // its new place in the row from the host (`passage`), anchored at the top rather than from the bottom.
+    var keepsPassage = false
+    let widthChanged = abs(viewport.width - previous.viewport.width) > 0.01
+    if passageAnchor.map({ index[$0.id] == nil || previous.placement(for: $0.id) == nil }) ?? false { passageAnchor = nil }
+    if passageAnchor == nil, widthChanged, update.scroll == .preserve, passage != nil, case .row = position,
+       let tall = previous.placements.first(where: {
+         $0.y < previous.viewport.usableTop - 0.5 && $0.maxY > previous.viewport.usableTop
+           && $0.height > previous.viewport.usableHeight && index[$0.id] != nil
+       })
+    {
+      passageAnchor = (tall.id, previous.viewport.usableTop - tall.y, previous.viewport.width)
+    }
+    if widthChanged, update.scroll == .preserve, let passage, let anchor = passageAnchor, case .row = position {
+      let moved = passage(anchor.id, anchor.offset, anchor.width, viewport.width)
+      position = .row(anchor.id, top: viewport.usableTop - moved)
+      sizeAnchor = anchor.id
+      keepsPassage = true
+    } else if resized, update.scroll == .preserve, case let .row(id, _) = position {
       if let anchor = sizeAnchor, let placed = previous.placement(for: anchor), index[anchor] != nil {
         position = .row(anchor, top: placed.y)
       } else {
         sizeAnchor = id
       }
     }
-    if case let .row(id, top) = position, update.followsBottomInset {
+    if !keepsPassage, case let .row(id, top) = position, update.followsBottomInset {
       // A reading row keeps its distance from the usable bottom: it follows the keyboard, the
       // composer and a change of the view's height.
       position = .row(id, top: top + (viewport.usableBottom - previous.viewport.usableBottom))
@@ -178,7 +212,8 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
 
     layout = TimelineSolver.layout(
       rows: rows, index: index, viewport: viewport, position: position, margins: margins,
-      allowsOverscroll: update.allowsOverscroll, spanEnd: spanEnd, height: height
+      allowsOverscroll: update.allowsOverscroll, readingAnchor: readingAnchor, spanEnd: spanEnd, spanStart: spanStart,
+      height: height
     )
     if layout.position == .latest { sizeAnchor = nil }
     return Self.change(from: previous, previousIndex: previousIndex, to: layout, index: index, coverage: coverage,
@@ -188,7 +223,7 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
   /// A reading row that left the data hands its place to the nearest placed row that stayed:
   /// newer rows first, then older ones.
   private static func survivingPosition(
-    _ position: TimelinePosition<ID>, previous: TimelineLayout<ID>, index: [ID: Int]
+    _ position: TimelinePosition<ID>, previous: TimelineLayout<ID>, index: TimelineRowIndex<ID>
   ) -> TimelinePosition<ID> {
     guard case let .row(id, _) = position, index[id] == nil else { return position }
     let placements = previous.placements
@@ -203,7 +238,8 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
   }
 
   private static func change(
-    from previous: TimelineLayout<ID>, previousIndex: [ID: Int], to layout: TimelineLayout<ID>, index: [ID: Int],
+    from previous: TimelineLayout<ID>, previousIndex: TimelineRowIndex<ID>, to layout: TimelineLayout<ID>,
+    index: TimelineRowIndex<ID>,
     coverage: TimelineCoverage, demandThreshold: Int
   ) -> TimelineChange<ID> {
     var oldByID: [ID: TimelinePlacement<ID>] = [:]
