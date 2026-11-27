@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacUI
 
 final class ReplyThreadSummaryView: NSView {
   static let baseHeight: CGFloat = 30
@@ -415,16 +416,17 @@ final class ReplyThreadSummaryView: NSView {
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    menuProvider?() ?? super.menu(for: event)
+    guard let menu = menuProvider?() else { return super.menu(for: event) }
+    return ContextMenu.intercept(menu, for: event, in: self)
   }
 
   override func rightMouseDown(with event: NSEvent) {
-    guard let menu = menu(for: event) else {
+    guard let menu = menuProvider?() else {
       super.rightMouseDown(with: event)
       return
     }
 
-    NSMenu.popUpContextMenu(menu, with: event, for: self)
+    ContextMenu.popUp(menu, with: event, for: self)
   }
 
   override var acceptsFirstResponder: Bool {

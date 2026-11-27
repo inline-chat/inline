@@ -2,7 +2,6 @@ import Auth
 import InlineKit
 import InlineUI
 import Logger
-import RealtimeV2
 import SwiftUI
 
 struct ReactionOverlayView: View {
@@ -12,6 +11,8 @@ struct ReactionOverlayView: View {
   let onDismiss: () -> Void
   let onEmojiPickerActiveChanged: (Bool) -> Void
   let onEmojiPickerDismissed: () -> Void
+  /// Open with the full emoji picker showing, for the + of the context menu's reactions bar.
+  var opensEmojiPicker = false
 
   private static let log = Log.scoped("ReactionOverlayView")
 
@@ -38,43 +39,12 @@ struct ReactionOverlayView: View {
   }
 
   private func handleReactionSelected(_ emoji: String) {
-    // Message suggestions are already validated and must be sent exactly as displayed.
-    let selectedEmoji = messageReactions.contains(emoji) ? emoji : EmojiPickerValue.normalizedEmoji(from: emoji)
-    guard let emoji = selectedEmoji else { return }
-
-    // Check if user already reacted with this emoji
-    guard let currentUserId = Auth.shared.getCurrentUserId() else {
+    guard Auth.shared.getCurrentUserId() != nil else {
       onDismiss()
       return
     }
-
-    let hasReaction = fullMessage.reactions.contains {
-      $0.reaction.emoji == emoji && $0.reaction.userId == currentUserId
-    }
-
-    Task(priority: .userInitiated) { @MainActor in
-      do {
-        if hasReaction {
-          // Remove reaction
-          try await Api.realtime.send(.deleteReaction(
-            emoji: emoji,
-            message: fullMessage.message
-          ))
-        } else {
-          // Add reaction
-          try await Api.realtime.send(.addReaction(
-            emoji: emoji,
-            message: fullMessage.message
-          ))
-          ReactionPickerEmojiUsageStore.recordPick(emoji)
-          reloadSuggestedReactions()
-        }
-      } catch {
-        Self.log.error("Failed to update reaction", error: error)
-      }
-    }
-
-    // Dismiss the overlay
+    MessageReactionActions.toggle(emoji, on: fullMessage, messageEmojis: messageReactions)
+    reloadSuggestedReactions()
     onDismiss()
   }
 
@@ -98,26 +68,11 @@ struct ReactionOverlayView: View {
   }
 
   private func reloadSuggestedReactions() {
-    let messageText = fullMessage.message.text
-    let counts = ReactionPickerEmojiUsageStore.usageCounts()
-    let sourceReactions = ReactionPickerEmojis.suggestions(from: counts)
-    var displayedReactions: [String] = []
-    var sources: [String: String] = [:]
-
-    for source in sourceReactions {
-      let displayed = AppSettings.shared.preferredEmojiSkinTone.applying(to: source)
-      guard sources[displayed] == nil else { continue }
-      sources[displayed] = source
-      displayedReactions.append(displayed)
-    }
-
-    suggestionCounts = counts
-    suggestionSources = sources
-    messageReactions = Set(ReactionPickerEmojis.prioritizingMessageEmojis(in: messageText, among: []))
-    suggestedReactions = ReactionPickerEmojis.prioritizingMessageEmojis(
-      in: messageText,
-      among: displayedReactions
-    )
+    let suggestions = MessageReactionActions.suggestions(for: fullMessage)
+    suggestionCounts = suggestions.usageCounts
+    suggestionSources = suggestions.sources
+    messageReactions = suggestions.messageEmojis
+    suggestedReactions = suggestions.displayed
   }
 
   var body: some View {
@@ -160,6 +115,10 @@ struct ReactionOverlayView: View {
       withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
         appearScale = 1.0
         appearOpacity = 1.0
+      }
+      if opensEmojiPicker {
+        // After the first layout, so the picker anchors to the + button.
+        DispatchQueue.main.async { showEmojiPicker() }
       }
     }
     .onDisappear {

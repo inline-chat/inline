@@ -10,14 +10,20 @@ class ReactionOverlayWindow: NSPanel {
   private static var activeByMessageView: [ObjectIdentifier: ReactionOverlayWindow] = [:]
 
   @discardableResult
-  static func show(messageView: NSView, fullMessage: FullMessage, above anchorRect: NSRect? = nil) -> ReactionOverlayWindow {
+  static func show(
+    messageView: NSView,
+    fullMessage: FullMessage,
+    above anchorRect: NSRect? = nil,
+    opensEmojiPicker: Bool = false
+  ) -> ReactionOverlayWindow {
     let key = ObjectIdentifier(messageView)
     activeByMessageView[key]?.close()
 
     let overlayWindow = ReactionOverlayWindow(
       messageView: messageView,
       fullMessage: fullMessage,
-      above: anchorRect
+      above: anchorRect,
+      opensEmojiPicker: opensEmojiPicker
     )
     activeByMessageView[key] = overlayWindow
 
@@ -42,7 +48,7 @@ class ReactionOverlayWindow: NSPanel {
   var onClose: (() -> Void)?
   weak var toggleButton: NSButton?
 
-  init(messageView: NSView, fullMessage: FullMessage, above anchorRect: NSRect?) {
+  init(messageView: NSView, fullMessage: FullMessage, above anchorRect: NSRect?, opensEmojiPicker: Bool = false) {
     self.messageView = messageView
     messageViewKey = ObjectIdentifier(messageView)
     self.fullMessage = fullMessage
@@ -66,7 +72,8 @@ class ReactionOverlayWindow: NSPanel {
       },
       onEmojiPickerDismissed: { [weak self] in
         self?.closeWithAnimation()
-      }
+      },
+      opensEmojiPicker: opensEmojiPicker
     )
 
     // Initialize hosting view

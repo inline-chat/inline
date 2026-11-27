@@ -181,6 +181,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupAuthAccountRecoveryObserver()
     // After launch work, so reading Focus never delays the first window.
     Task { @MainActor in FocusStatusReporter.shared.start() }
+    // Context menu panels made ahead of the first right click (creating a window costs ~30 ms the
+    // first time), well after the first window is up.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { ContextMenu.prewarm() }
+    #if DEBUG
+    ContextMenuDemo.startIfRequested()
+    #endif
     dependencies.viewModel.$topLevelRoute
       .receive(on: RunLoop.main)
       .sink { [weak self] route in

@@ -1,4 +1,5 @@
 import AppKit
+import InlineMacUI
 import TextProcessing
 
 final class RichBlockMathNodeView: RichBlockRenderableView {
@@ -103,12 +104,13 @@ final class RichBlockMathNodeView: RichBlockRenderableView {
       }
       ancestor = view.superview
     }
-    let menu = inherited ?? NSMenu()
+    let menu = inherited ?? ContextMenu()
     let item = NSMenuItem(title: "Copy LaTeX", action: #selector(copySource), keyEquivalent: "")
     item.target = self
+    item.image = NSImage(systemSymbolName: "function", accessibilityDescription: nil)
     if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
     menu.insertItem(item, at: 0)
-    return menu
+    return ContextMenu.intercept(menu, for: event, in: self)
   }
 
   @objc private func copySource() -> Bool {

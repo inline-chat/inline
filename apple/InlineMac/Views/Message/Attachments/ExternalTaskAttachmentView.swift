@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import InlineKit
+import InlineMacUI
 import Logger
 
 class ExternalTaskAttachmentView: NSView, AttachmentView {
@@ -236,7 +237,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     }
     MessageGestureTrace.debug("ExternalTaskAttachmentView.handleRightClick action=showMenu url=\(MessageGestureTrace.url(url))")
 
-    let menu = NSMenu()
+    let menu = ContextMenu()
 
     let openAction = NSMenuItem(title: "Open URL", action: #selector(openURL), keyEquivalent: "")
     openAction.target = self
@@ -253,9 +254,10 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     let deleteAction = NSMenuItem(title: "Delete", action: #selector(showDeleteConfirmation), keyEquivalent: "")
     deleteAction.target = self
     deleteAction.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+    deleteAction.contextMenuStyle = .destructive
     menu.addItem(deleteAction)
 
-    NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent!, for: self)
+    ContextMenu.popUp(menu, with: NSApp.currentEvent!, for: self)
   }
 
   @objc private func openURL() {

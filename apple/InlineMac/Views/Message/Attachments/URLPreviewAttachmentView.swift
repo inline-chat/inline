@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacUI
 import InlineUI
 import Logger
 import Quartz
@@ -887,13 +888,14 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    makeContextMenu() ?? super.menu(for: event)
+    guard let menu = makeContextMenu() else { return super.menu(for: event) }
+    return ContextMenu.intercept(menu, for: event, in: self)
   }
 
   private func showContextMenu(with event: NSEvent) -> Bool {
     guard let menu = makeContextMenu() else { return false }
     setPressed(false)
-    NSMenu.popUpContextMenu(menu, with: event, for: self)
+    ContextMenu.popUp(menu, with: event, for: self)
     return true
   }
 
@@ -907,7 +909,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   private func makeContextMenu() -> NSMenu? {
     guard previewURL != nil else { return nil }
 
-    let menu = NSMenu()
+    let menu = ContextMenu()
 
     let openAction = NSMenuItem(title: "Open Link", action: #selector(openPreviewURLFromMenu), keyEquivalent: "")
     openAction.target = self
@@ -1187,13 +1189,14 @@ private final class PreviewImageContainerView: NSView {
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    contextMenuProvider?() ?? super.menu(for: event)
+    guard let menu = contextMenuProvider?() else { return super.menu(for: event) }
+    return ContextMenu.intercept(menu, for: event, in: self)
   }
 
   private func showContextMenu(with event: NSEvent) -> Bool {
     guard let menu = contextMenuProvider?() else { return false }
     setPressed(false)
-    NSMenu.popUpContextMenu(menu, with: event, for: self)
+    ContextMenu.popUp(menu, with: event, for: self)
     return true
   }
 

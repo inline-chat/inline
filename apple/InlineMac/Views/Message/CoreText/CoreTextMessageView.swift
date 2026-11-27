@@ -1,4 +1,5 @@
 import AppKit
+import InlineMacUI
 import CoreText
 import InlineKit
 import InlineMessageLayout
@@ -492,7 +493,8 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
 
   override func menu(for event: NSEvent) -> NSMenu? {
     let index = characterIndex(at: convert(event.locationInWindow, from: nil))
-    return onContextMenu?(index, event) ?? super.menu(for: event)
+    guard let menu = onContextMenu?(index, event) else { return super.menu(for: event) }
+    return ContextMenu.intercept(menu, for: event, in: self)
   }
 
   /// The text items NSTextView offers for a right click at `index` (Look Up and Translate for

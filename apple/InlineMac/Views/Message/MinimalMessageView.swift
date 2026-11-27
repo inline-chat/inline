@@ -791,8 +791,6 @@ class MinimalMessageViewAppKit: NSView {
     }
 
     guard let desiredView else { return }
-    documentContainerView.menu = menu
-    desiredView.menu = menu
 
     if desiredView.superview !== documentContainerView {
       desiredView.removeFromSuperview()
@@ -3395,7 +3393,6 @@ class MinimalMessageViewAppKit: NSView {
         return view
       }()
       let wasAttached = richView.superview != nil
-      richView.menu = menu
       richView.onTextEntityClick = { [weak self] hit, text in
         self?.handleTextEntityClick(hit, attributedString: text) ?? false
       }
@@ -3622,35 +3619,29 @@ class MinimalMessageViewAppKit: NSView {
         for item in contextMenu.items where item.action != nil && item.target == nil {
           item.target = self
         }
+        // Kept so scrolling and hover-out can cancel it, as they did the pull-down.
         quickActionsMenu = contextMenu
-        defer { quickActionsMenu = nil }
-        contextMenu.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
-        // A pull-down opens off the button's lower edge instead of centering a
-        // selected menu item over it. Keep the first real action visible.
-        let pullDown = NSPopUpButtonCell(textCell: "", pullsDown: true)
-        pullDown.usesItemFromMenu = false
-        pullDown.arrowPosition = .noArrow
-        pullDown.isBordered = false
-        pullDown.image = button.image
-        pullDown.imagePosition = .imageOnly
-        pullDown.controlSize = .small
-        pullDown.menu = contextMenu
-        pullDown.preferredEdge = button.isFlipped ? .maxY : .minY
-        pullDown.performClick(withFrame: button.bounds.insetBy(dx: 0, dy: -6), in: button)
+        // Opens off the button's lower edge, like a pull-down.
+        let below = NSPoint(x: button.bounds.minX, y: button.isFlipped ? button.bounds.maxY + 4 : button.bounds.minY - 4)
+        ContextMenu.popUp(contextMenu, at: below, in: button)
     }
     return nil
   }
 
+  /// The message menu is built when it opens, in `menu(for:)`: right clicks anywhere in the message
+  /// (documents, voice, rich blocks included) bubble up to it, and text views ask through their
+  /// delegates. No view keeps a menu of its own.
   private func setupContextMenu() {
-    let newMenu = NSMenu()
-    newMenu.delegate = self
-    menu = newMenu
-    if hasDocument {
-      documentContainerView.menu = newMenu
-      if hasVoiceInDocumentSlot {
-        voiceMessageView?.menu = newMenu
-      }
-    }
+    menu = nil
+  }
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    ContextMenu.intercept(createMenu(context: .message), for: event, in: self)
+  }
+
+  /// VoiceOver's and Full Keyboard Access's show-menu on the message.
+  override func accessibilityPerformShowMenu() -> Bool {
+    ContextMenu.showForAccessibility(in: self) { createMenu(context: .message) }
   }
 
   @objc private func addReaction() {
@@ -3846,7 +3837,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func makeReplyThreadSummaryMenu() -> NSMenu {
-    let menu = NSMenu()
+    let menu = ContextMenu()
     if !message.isSubthreadPlacement {
       menu.addItem(replyThreadMenuItem(
         title: "Open in Side Pane",
@@ -5268,9 +5259,9 @@ extension MinimalMessageViewAppKit: NSTextViewDelegate, RichBlockTextMenuProvidi
     ReactionOverlayWindow.dismiss(for: self)
   }
 
-  func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at charIndex: Int) -> NSMenu? {
+  func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
     let linkURL = linkURLForContextMenu(at: charIndex)
-    return createMenu(context: .textView, nativeMenu: menu, linkURL: linkURL)
+    return ContextMenu.intercept(createMenu(context: .textView, nativeMenu: menu, linkURL: linkURL), for: event, in: textView)
   }
 
   func richBlockTextMenu(
@@ -5302,19 +5293,6 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     case textView
   }
 
-  func menuNeedsUpdate(_ menu: NSMenu) {
-    guard menu === self.menu else { return }
-    let updatedMenu = richBlockMessageMenu()
-    menu.removeAllItems()
-    for item in updatedMenu.items {
-      // NSMenuItem can only belong to one NSMenu. Copy before inserting to avoid:
-      // "Item to be inserted into menu already is in another menu".
-      if let copied = item.copy() as? NSMenuItem {
-        menu.addItem(copied)
-      }
-    }
-  }
-
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil, linkURL: URL? = nil) -> NSMenu {
     MessageListTextSelection.retargetCopy(
       in: createMessageMenu(context: context, nativeMenu: nativeMenu, linkURL: linkURL),
@@ -5323,21 +5301,43 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
   }
 
   private func createMessageMenu(context: MenuContext, nativeMenu: NSMenu?, linkURL: URL?) -> NSMenu {
-    let menu = NSMenu()
+    // Inline's own context menu: it can carry the reactions bar, and the same items show in our panels.
+    // Groups: answer, copy, media and files, change, integrations, the text view's own items, then
+    // the destructive action and footnotes.
+    let menu = ContextMenu()
 
     let regularMessage = quickActionsCanReact
-    // Reply
+
+    // Reactions live in the bar above the menu (+ opens the full picker).
+    if regularMessage {
+      menu.accessoryViewProvider = { [weak self] in
+        guard let self else { return nil }
+        return MessageReactionActions.contextMenuAccessory(for: fullMessage, messageView: self)
+      }
+    }
+
+    func addSection(_ items: [NSMenuItem]) {
+      guard !items.isEmpty else { return }
+      if !menu.items.isEmpty, menu.items.last?.isSeparatorItem == false {
+        menu.addItem(.separator())
+      }
+      items.forEach { menu.addItem($0) }
+    }
+
+    // Answer: reply, quote, thread, forward.
+    var answerItems: [NSMenuItem] = []
     if regularMessage, !isAnchorMessage {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
-      menu.addItem(replyItem)
+      replyItem.contextMenuIconEffect = .wiggleLeft
+      answerItems.append(replyItem)
 
       // Quote is offered only while part of this message is selected.
       if let quoted = selectedTextForQuote() {
         let quoteItem = NSMenuItem(title: "Quote", action: #selector(quoteSelection(_:)), keyEquivalent: "")
         quoteItem.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Quote")
         quoteItem.representedObject = quoted
-        menu.addItem(quoteItem)
+        answerItems.append(quoteItem)
       }
 
       let replyInThreadItem = NSMenuItem(
@@ -5349,36 +5349,161 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
         systemSymbolName: "arrowshape.turn.up.left.circle",
         accessibilityDescription: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread"
       )
-      menu.addItem(replyInThreadItem)
+      replyInThreadItem.contextMenuIconEffect = .wiggleLeft
+      answerItems.append(replyInThreadItem)
 
       if !message.isSubthreadPlacement {
         let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
         forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
+        forwardItem.contextMenuIconEffect = .wiggleRight
         if ExperimentalFeatureFlags.quickForwardEnabled, let dependencies,
            dependencies.forwardMessages != nil {
           forwardItem.submenu = ForwardMessageMenu.make(messages: props.album?.items ?? [fullMessage], dependencies: dependencies)
         }
-        menu.addItem(forwardItem)
-        if message.messageId > 0,
-           message.status == nil || message.status == .sent
-        {
-          let selectItem = NSMenuItem(
-            title: "Select", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
-          )
-          selectItem.target = self
-          selectItem.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
-          menu.addItem(selectItem)
-        }
+        answerItems.append(forwardItem)
+      }
+    }
+    addSection(answerItems)
+
+    // Copy: the message, the selection, a link under the pointer, the message link, the image.
+    var copyItems: [NSMenuItem] = []
+    if hasText {
+      let copyItem = NSMenuItem(title: "Copy Text", action: #selector(copyMessage), keyEquivalent: "c")
+      copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
+      copyItems.append(copyItem)
+
+      if canCopyMessageWithEntities {
+        let debugCopyItem = NSMenuItem(
+          title: "Copy Message + Entities",
+          action: #selector(copyMessageWithEntities),
+          keyEquivalent: ""
+        )
+        copyItems.append(debugCopyItem)
       }
     }
 
-    // Edit
+    if context == .textView,
+       let nativeMenu,
+       let nativeCopyItem = nativeMenu.items.first(where: { $0.action == #selector(NSText.copy(_:)) })
+    {
+      let newItem = nativeCopyItem.copy() as! NSMenuItem
+      newItem.title = "Copy Selected Text"
+      newItem.image = NSImage(systemSymbolName: "text.cursor", accessibilityDescription: nil)
+      copyItems.append(newItem)
+    }
+
+    if context == .textView, let linkURL {
+      let copyLinkItem = NSMenuItem(
+        title: "Copy Link Address",
+        action: #selector(copyLinkAddress),
+        keyEquivalent: ""
+      )
+      copyLinkItem.target = self
+      copyLinkItem.representedObject = linkURL
+      copyLinkItem.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Copy Link")
+      copyLinkItem.contextMenuIconEffect = .wiggleClockwise
+      copyItems.append(copyLinkItem)
+    }
+
+    if regularMessage,
+       InlineDeepLink.message(chatId: message.chatId, messageId: message.messageId).url != nil {
+      let copyMessageLinkItem = NSMenuItem(
+        title: "Copy Message Link",
+        action: #selector(copyMessageLink),
+        keyEquivalent: ""
+      )
+      copyMessageLinkItem.target = self
+      copyMessageLinkItem.image = NSImage(
+        systemSymbolName: "link",
+        accessibilityDescription: "Copy Message Link"
+      )
+      copyMessageLinkItem.contextMenuIconEffect = .wiggleClockwise
+      copyItems.append(copyMessageLinkItem)
+    }
+
+    // An album's photos open one at a time, from their tiles.
+    if hasPhoto, props.album == nil {
+      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
+      copyItem.target = photoView
+      copyItem.isEnabled = true
+      copyItem.image = NSImage(systemSymbolName: "photo.on.rectangle", accessibilityDescription: "Copy Image")
+      copyItems.append(copyItem)
+    }
+    addSection(copyItems)
+
+    // Media and files.
+    if hasPhoto {
+      let saveItem = NSMenuItem(title: "Save Image", action: #selector(photoView.saveImage), keyEquivalent: "m")
+      saveItem.target = photoView
+      saveItem.isEnabled = true
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Image")
+      saveItem.contextMenuIconEffect = .bounceDown
+      addSection([saveItem])
+    }
+
+    if hasVideo {
+      var videoItems: [NSMenuItem] = []
+      let openItem = NSMenuItem(title: "Open Video", action: #selector(videoView.openQuickLook), keyEquivalent: "v")
+      openItem.target = videoView
+      openItem.isEnabled = true
+      openItem.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Play")
+      videoItems.append(openItem)
+
+      let saveItem = NSMenuItem(
+        title: "Save Video",
+        action: #selector(videoView.saveVideo),
+        keyEquivalent: "s"
+      )
+      saveItem.target = videoView
+      saveItem.isEnabled = true
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Video")
+      saveItem.contextMenuIconEffect = .bounceDown
+      videoItems.append(saveItem)
+
+      if videoView.canSaveAsGIF {
+        let saveGIFItem = NSMenuItem(
+          title: "Save GIF",
+          action: #selector(videoView.saveGIF),
+          keyEquivalent: "g"
+        )
+        saveGIFItem.target = videoView
+        saveGIFItem.isEnabled = true
+        saveGIFItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save GIF")
+        saveGIFItem.contextMenuIconEffect = .bounceDown
+        videoItems.append(saveGIFItem)
+      }
+      addSection(videoItems)
+    }
+
+    // The message's file, or the album file under the mouse.
+    if hasActualDocument || albumFileRowUnderMouse != nil {
+      if menu.items.last?.isSeparatorItem == false {
+        menu.addItem(.separator())
+      }
+      if hasActualDocument {
+        documentView?.appendContextMenuItems(to: menu)
+      } else if let row = albumFileRowUnderMouse {
+        row.appendContextMenuItems(to: menu)
+      }
+    }
+
+    if canSaveLoadedVoice {
+      let saveItem = NSMenuItem(title: "Save Audio", action: #selector(saveAudio), keyEquivalent: "s")
+      saveItem.target = self
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Audio")
+      saveItem.contextMenuIconEffect = .bounceDown
+      addSection([saveItem])
+    }
+
+    // Change: edit (own messages), pin, select.
+    var changeItems: [NSMenuItem] = []
     if !isAnchorMessage, !message.isSubthreadPlacement, !message.isGridTranscript, message.out == true,
        message.status == .sent
     {
       let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
       editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
-      menu.addItem(editItem)
+      editItem.contextMenuIconEffect = .wiggleClockwise
+      changeItems.append(editItem)
     }
 
     if regularMessage, !isAnchorMessage {
@@ -5390,17 +5515,23 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
         systemSymbolName: pinned ? "pin.slash" : "pin",
         accessibilityDescription: pinTitle
       )
-      menu.addItem(pinItem)
+      pinItem.contextMenuIconEffect = .bounceDown
+      changeItems.append(pinItem)
     }
 
-    if regularMessage {
-      // Add reaction action
-      let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "e")
-      addReactionItem.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "Add Reaction")
-      menu.addItem(addReactionItem)
+    if regularMessage, !isAnchorMessage, !message.isSubthreadPlacement, message.messageId > 0,
+       message.status == nil || message.status == .sent
+    {
+      let selectItem = NSMenuItem(
+        title: "Select", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
+      )
+      selectItem.target = self
+      selectItem.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
+      changeItems.append(selectItem)
     }
+    addSection(changeItems)
 
-    // Integrations section (separator above + below)
+    // Integrations.
     var integrationItems: [NSMenuItem] = []
 
     if regularMessage, !isAnchorMessage, NotionTaskService.shared.hasAccess(peerId: message.peerId) {
@@ -5426,220 +5557,74 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
         integrationItems.append(createLinearIssueItem)
       }
     }
+    addSection(integrationItems)
 
-    if !integrationItems.isEmpty {
-      if !menu.items.isEmpty {
-        menu.addItem(NSMenuItem.separator())
-      }
-      integrationItems.forEach { menu.addItem($0) }
-      menu.addItem(NSMenuItem.separator())
-    }
-
-    var rendersCopyText = false
-
-    if regularMessage,
-       InlineDeepLink.message(chatId: message.chatId, messageId: message.messageId).url != nil {
-      let copyMessageLinkItem = NSMenuItem(
-        title: "Copy Message Link",
-        action: #selector(copyMessageLink),
-        keyEquivalent: ""
-      )
-      copyMessageLinkItem.target = self
-      copyMessageLinkItem.image = NSImage(
-        systemSymbolName: "link",
-        accessibilityDescription: "Copy Message Link"
-      )
-      menu.addItem(copyMessageLinkItem)
-    }
-
-    if context == .textView, let linkURL {
-      let copyLinkItem = NSMenuItem(
-        title: "Copy Link Address",
-        action: #selector(copyLinkAddress),
-        keyEquivalent: ""
-      )
-      copyLinkItem.target = self
-      copyLinkItem.representedObject = linkURL
-      copyLinkItem.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Copy Link")
-      menu.addItem(copyLinkItem)
-    }
-
-    // Add native copy for selected text if in text view context
-    if context == .textView,
-       let nativeMenu,
-       let nativeCopyItem = nativeMenu.items.first(where: { $0.action == #selector(NSText.copy(_:)) })
-    {
-      let newItem = nativeCopyItem.copy() as! NSMenuItem
-      newItem.title = "Copy Selected Text"
-      menu.addItem(newItem)
-      rendersCopyText = true
-    }
-
-    // Add copy message action for text
-    if hasText {
-      let copyItem = NSMenuItem(title: "Copy Text", action: #selector(copyMessage), keyEquivalent: "c")
-      if !rendersCopyText {
-        copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
-        rendersCopyText = true
-      }
-      menu.addItem(copyItem)
-
-      if canCopyMessageWithEntities {
-        let debugCopyItem = NSMenuItem(
-          title: "Copy Message + Entities",
-          action: #selector(copyMessageWithEntities),
-          keyEquivalent: ""
-        )
-        menu.addItem(debugCopyItem)
-      }
-    }
-
-    // Add photo actions (an album's photos open one at a time, from their tiles)
-    if hasPhoto, props.album == nil {
-      let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
-      copyItem.target = photoView
-      copyItem.isEnabled = true
-      copyItem.image = NSImage(systemSymbolName: "photo.on.rectangle", accessibilityDescription: "Copy Image")
-      menu.addItem(copyItem)
-    }
-
-    if hasPhoto {
-      menu.addItem(NSMenuItem.separator())
-      let saveItem = NSMenuItem(title: "Save Image", action: #selector(photoView.saveImage), keyEquivalent: "m")
-      saveItem.target = photoView
-      saveItem.isEnabled = true
-      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Image")
-      menu.addItem(saveItem)
-    }
-
-    // Add video actions
-    if hasVideo {
-      menu.addItem(NSMenuItem.separator())
-      let openItem = NSMenuItem(title: "Open Video", action: #selector(videoView.openQuickLook), keyEquivalent: "v")
-      openItem.target = videoView
-      openItem.isEnabled = true
-      openItem.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Play")
-      menu.addItem(openItem)
-
-      let saveItem = NSMenuItem(
-        title: "Save Video",
-        action: #selector(videoView.saveVideo),
-        keyEquivalent: "s"
-      )
-      saveItem.target = videoView
-      saveItem.isEnabled = true
-      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Video")
-      menu.addItem(saveItem)
-
-      if videoView.canSaveAsGIF {
-        let saveGIFItem = NSMenuItem(
-          title: "Save GIF",
-          action: #selector(videoView.saveGIF),
-          keyEquivalent: "g"
-        )
-        saveGIFItem.target = videoView
-        saveGIFItem.isEnabled = true
-        saveGIFItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save GIF")
-        menu.addItem(saveGIFItem)
-      }
-    }
-
-    // Add document actions: the message's file, or the album file under the mouse.
-    if hasActualDocument {
-      documentView?.appendContextMenuItems(to: menu)
-    } else if let row = albumFileRowUnderMouse {
-      row.appendContextMenuItems(to: menu)
-    }
-
-    if canSaveLoadedVoice {
-      menu.addItem(NSMenuItem.separator())
-      let saveItem = NSMenuItem(title: "Save Audio", action: #selector(saveAudio), keyEquivalent: "s")
-      saveItem.target = self
-      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Audio")
-      menu.addItem(saveItem)
-    }
-
-    // Add other native menu items if in text view context
+    // The text view's own items for the click: Look Up, Translate.
     if context == .textView, let nativeMenu {
-      menu.addItem(NSMenuItem.separator())
-
+      var textItems: [NSMenuItem] = []
       for item in nativeMenu.items {
         if item.title.hasPrefix("Look Up") {
           let newItem = item.copy() as! NSMenuItem
-          newItem.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Save Document")
-          menu.addItem(newItem)
+          newItem.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Look Up")
+          textItems.append(newItem)
         }
 
         if item.title.hasPrefix("Translate") {
           let newItem = item.copy() as! NSMenuItem
-          menu.addItem(newItem)
+          newItem.image = NSImage(systemSymbolName: "translate", accessibilityDescription: "Translate")
+          textItems.append(newItem)
         }
       }
+      addSection(textItems)
     }
 
-    menu.addItem(NSMenuItem.separator())
-
-    // Resend for failed messages
+    // Resend, then delete or cancel.
+    var destructiveItems: [NSMenuItem] = []
     if message.status == .failed {
       let resendItem = NSMenuItem(title: "Resend", action: #selector(resendMessage), keyEquivalent: "")
       resendItem.target = self
       resendItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Resend")
-      menu.addItem(resendItem)
+      resendItem.contextMenuIconEffect = .rotate
+      destructiveItems.append(resendItem)
     }
 
-    // Delete or cancel button
     if message.status == .sending {
       let cancelTitle = fullMessage.showsPhotoUploadProgress ? "Cancel Upload" : "Cancel"
-      let cancelItem = NSMenuItem(title: cancelTitle, action: #selector(cancelMessage), keyEquivalent: "delete")
+      let cancelItem = NSMenuItem(title: cancelTitle, action: #selector(cancelMessage), keyEquivalent: "\u{8}")
       cancelItem.target = self
       cancelItem.image = NSImage(systemSymbolName: "x.circle", accessibilityDescription: cancelTitle)
-      menu.addItem(cancelItem)
+      cancelItem.contextMenuStyle = .destructive
+      destructiveItems.append(cancelItem)
     } else {
-      let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "delete")
+      let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "\u{8}")
       deleteItem.target = self
       deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete")
-      menu.addItem(deleteItem)
+      deleteItem.contextMenuStyle = .destructive
+      deleteItem.contextMenuIconEffect = .wiggleClockwise
+      destructiveItems.append(deleteItem)
+    }
+    addSection(destructiveItems)
+
+    // Footnotes: small text under the actions (disabled rows in the system menu).
+    func addFootnote(_ title: String) {
+      let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+      item.isEnabled = false
+      item.contextMenuStyle = .footnote
+      menu.addItem(item)
     }
 
-    /// If message is edited, show edit date in context menu
     if let editDate = message.editDate {
-      menu.addItem(NSMenuItem.separator())
       let formatted = DateFormatter.localizedString(from: editDate, dateStyle: .medium, timeStyle: .short)
-      let editDateItem = NSMenuItem(title: "Edited \(formatted)", action: nil, keyEquivalent: "")
-      editDateItem.isEnabled = false
-      menu.addItem(editDateItem)
+      addFootnote("Edited \(formatted)")
+    }
+
+    if let attribution = fullMessage.acknowledgementAttributionLabel {
+      addFootnote(attribution)
     }
 
     #if DEBUG
-    menu.addItem(NSMenuItem.separator())
-
-    // Add debug items
-    let idItem = NSMenuItem(title: "ID: \(message.id)", action: nil, keyEquivalent: "")
-    idItem.isEnabled = false
-    menu.addItem(idItem)
-
-    let indexItem = NSMenuItem(
-      title: "Index: \(props.index?.description ?? "?")",
-      action: nil,
-      keyEquivalent: ""
-    )
-    indexItem.isEnabled = false
-    menu.addItem(indexItem)
-
+    addFootnote("ID: \(message.id) · Index: \(props.index?.description ?? "?")")
     #endif
-
-    if let attribution = fullMessage.acknowledgementAttributionLabel {
-      if !menu.items.isEmpty, menu.items.last?.isSeparatorItem == false {
-        menu.addItem(.separator())
-      }
-      let attributionItem = NSMenuItem(title: attribution, action: nil, keyEquivalent: "")
-      attributionItem.image = NSImage(
-        systemSymbolName: "person.2",
-        accessibilityDescription: attribution
-      )
-      attributionItem.isEnabled = false
-      menu.addItem(attributionItem)
-    }
 
     menu.delegate = self
     return menu

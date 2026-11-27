@@ -1,4 +1,5 @@
 import AppKit
+import InlineMacUI
 import TextProcessing
 
 protocol RichBlockTextMenuProviding: AnyObject {
@@ -211,23 +212,28 @@ final class RichBlockTextSurface: NSView {
 
 extension RichBlockTextSurface: NSTextViewDelegate {
   func textView(
-    _: NSTextView,
+    _ textView: NSTextView,
     menu: NSMenu,
     for event: NSEvent,
     at charIndex: Int
   ) -> NSMenu? {
+    ContextMenu.intercept(textMenu(nativeMenu: menu, event: event, characterIndex: charIndex), for: event, in: textView)
+  }
+
+  /// The message's text menu, with the text view's own items (Look Up, Translate) for the click.
+  fileprivate func textMenu(nativeMenu: NSMenu, event: NSEvent, characterIndex: Int) -> NSMenu? {
     var ancestor = superview
     while let view = ancestor {
       if let provider = view as? RichBlockTextMenuProviding {
         return provider.richBlockTextMenu(
-          nativeMenu: menu,
+          nativeMenu: nativeMenu,
           event: event,
-          characterIndex: charIndex,
+          characterIndex: characterIndex,
           attributedText: text
         )
       }
       ancestor = view.superview
     }
-    return menu
+    return nativeMenu
   }
 }
