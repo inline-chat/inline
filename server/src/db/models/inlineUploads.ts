@@ -228,7 +228,9 @@ const sameMetadata = (row: DbInlineUpload, metadata: InlineUploadMetadata): bool
   row.byteCount === metadata.byteCount &&
   sameBytes(row.sha256, metadata.sha256) &&
   row.kind === metadata.kind &&
-  row.thumbnailFileUniqueId === (metadata.thumbnailFileUniqueId ?? null) &&
+  // A create may leave the thumbnail to finish; its replay then matches the finished row too.
+  (row.thumbnailFileUniqueId === (metadata.thumbnailFileUniqueId ?? null) ||
+    (metadata.thumbnailFileUniqueId === undefined && row.status !== "uploading")) &&
   row.videoWidth === (metadata.videoWidth ?? null) &&
   row.videoHeight === (metadata.videoHeight ?? null) &&
   row.duration === (metadata.duration ?? null) &&
@@ -390,6 +392,8 @@ export class InlineUploadRepository {
     owner: InlineUploadOwner,
     metadata: InlineUploadMetadata,
     admission?: { maxActiveCount: number; maxReservedBytes: bigint },
+    /** The client's proposed upload ID (CreateUploadInput.upload_id); random when absent. */
+    proposedUploadId?: Uint8Array,
   ): Promise<{
     upload: InlineUploadRecord
     created: boolean
@@ -440,7 +444,13 @@ export class InlineUploadRepository {
         }
       }
 
-      const uploadId = randomBytes(16)
+      // A proposed ID another upload already holds falls back to a random one; the client sees a
+      // different ID in the result and waits for create replies from then on.
+      const proposedTaken = proposedUploadId !== undefined && (await tx.select({ id: inlineUploads.id })
+        .from(inlineUploads)
+        .where(eq(inlineUploads.uploadId, Buffer.from(proposedUploadId)))
+        .limit(1)).length > 0
+      const uploadId = proposedUploadId && !proposedTaken ? Buffer.from(proposedUploadId) : randomBytes(16)
       const partCount = Number((metadata.byteCount + BigInt(INLINE_UPLOAD_PART_SIZE - 1)) /
         BigInt(INLINE_UPLOAD_PART_SIZE))
       const resultFileUniqueId = inlineUploadFileUniqueId({ uploadId, kind: metadata.kind })
@@ -634,7 +644,12 @@ export class InlineUploadRepository {
     return { kind: "already-present", durableObjectKey: existing.objectKey }
   }
 
-  async requestFinish(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<
+  async requestFinish(
+    uploadId: Uint8Array,
+    owner: InlineUploadOwner,
+    /** Names the thumbnail when the create did not (FinishUploadInput.thumbnail_file_unique_id). */
+    thumbnailFileUniqueId?: string,
+  ): Promise<
     | { kind: "missing"; partIndices: number[] }
     | { kind: "processing" }
     | { kind: "queued"; uploadDbId: number; byteCount: bigint; partCount: number; uploadKind: InlineUploadKind }
@@ -669,12 +684,18 @@ export class InlineUploadRepository {
       const missing = Array.from({ length: row.partCount }, (_, index) => index)
         .filter((index) => !accepted.has(index))
       if (missing.length > 0) return { kind: "missing", partIndices: missing } as const
+      if (thumbnailFileUniqueId !== undefined &&
+          ((row.kind !== "video" && row.kind !== "document") ||
+           (row.thumbnailFileUniqueId !== null && row.thumbnailFileUniqueId !== thumbnailFileUniqueId))) {
+        return { kind: "rejected" } as const
+      }
       const resultFileUniqueId = row.resultFileUniqueId ?? inlineUploadFileUniqueId(row)
       await tx.update(inlineUploads).set({
         status: "processing",
         resultFileUniqueId,
         retryAt: now,
         attempts: 0,
+        ...(thumbnailFileUniqueId !== undefined ? { thumbnailFileUniqueId } : {}),
       }).where(eq(inlineUploads.id, row.id))
       return {
         kind: "queued",

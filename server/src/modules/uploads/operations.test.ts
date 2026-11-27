@@ -1049,6 +1049,100 @@ describe("native upload operations", () => {
       .rejects.toMatchObject({ codeNumber: 503, retryAfterSeconds: 5 })
   })
 
+  test("a client-picked upload ID is used, kept on replay, and lets parts go ahead of the create reply", async () => {
+    const user = await testUtils.createUser("native-upload-client-id@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = fastOperations(store)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE + 7).fill(5)
+    const proposed = new Uint8Array(16).fill(0x7a)
+    const createInput = {
+      clientUploadId: new Uint8Array(16).fill(127), fileName: "ahead.bin",
+      mimeType: "application/octet-stream", byteCount: BigInt(body.length),
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined as undefined }, uploadId: proposed,
+    }
+    // The part is handled first, as it may be when both are dispatched together.
+    const part = operations.savePart({ uploadId: proposed, partIndex: 0, data: body.subarray(0, INLINE_TRANSFER_PART_SIZE) }, requestContext)
+    await Bun.sleep(20)
+    const created = await operations.create(createInput, requestContext)
+    expect(Buffer.from(created.uploadId)).toEqual(Buffer.from(proposed))
+    expect(await part).toEqual({ alreadyPresent: false })
+    expect(await operations.savePart({ uploadId: proposed, partIndex: 1, data: body.subarray(INLINE_TRANSFER_PART_SIZE) }, requestContext))
+      .toEqual({ alreadyPresent: false })
+    const replay = await operations.create(createInput, requestContext)
+    expect(Buffer.from(replay.uploadId)).toEqual(Buffer.from(proposed))
+    expect(await operations.finish({ uploadId: proposed }, requestContext))
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
+  })
+
+  test("a part for an upload nobody creates is rejected after a short wait", async () => {
+    const user = await testUtils.createUser("native-upload-no-create@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(), new MemoryPartStore(), finalizer, () => {}, async () => {}, () => {},
+      { intake: new UploadPartIntake(), pieces: new UploadPieceAssembler(), earlyPartCreateWaitMs: 50 },
+    )
+    const started = Date.now()
+    await expect(operations.savePart({
+      uploadId: new Uint8Array(16).fill(0x7b), partIndex: 0, data: new Uint8Array(3),
+    }, context(user.id, account.session.id))).rejects.toMatchObject({ codeNumber: 400 })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(45)
+  })
+
+  test("a proposed upload ID another upload holds falls back to a server-picked one", async () => {
+    const user = await testUtils.createUser("native-upload-id-taken@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = fastOperations(new MemoryPartStore())
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([1, 2, 3])
+    const proposed = new Uint8Array(16).fill(0x7c)
+    const first = await createDocument(operations, requestContext, body, 128)
+    const taken = first.uploadId
+    const second = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(129), fileName: "fast.bin",
+      mimeType: "application/octet-stream", byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined }, uploadId: taken,
+    }, requestContext)
+    expect(Buffer.from(second.uploadId)).not.toEqual(Buffer.from(taken))
+    expect(proposed.length).toBe(16)
+  })
+
+  test("a document names its thumbnail at finish; a replayed create still matches it", async () => {
+    const user = await testUtils.createUser("native-upload-finish-thumbnail@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = fastOperations(new MemoryPartStore())
+    const requestContext = context(user.id, account.session.id)
+    const body = new TextEncoder().encode("thumbnail later")
+    const created = await createDocument(operations, requestContext, body, 130)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+    expect(await operations.finish({ uploadId: created.uploadId, thumbnailFileUniqueId: "INP_thumb" }, requestContext))
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
+    const [row] = await db.select({ thumbnail: inlineUploads.thumbnailFileUniqueId }).from(inlineUploads)
+      .where(eq(inlineUploads.uploadId, Buffer.from(created.uploadId))).limit(1)
+    expect(row?.thumbnail).toBe("INP_thumb")
+    const replay = await createDocument(operations, requestContext, body, 130)
+    expect(Buffer.from(replay.uploadId)).toEqual(Buffer.from(created.uploadId))
+  })
+
+  test("a photo cannot name a thumbnail at finish", async () => {
+    const user = await testUtils.createUser("native-upload-photo-thumbnail@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = fastOperations(new MemoryPartStore())
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([0xff, 0xd8, 0xff])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(131), fileName: "p.jpg", mimeType: "image/jpeg",
+      byteCount: 3n, sha256: createHash("sha256").update(body).digest(), kind: UploadKind.PHOTO,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+    await expect(operations.finish({ uploadId: created.uploadId, thumbnailFileUniqueId: "INP_x" }, requestContext))
+      .rejects.toMatchObject({ codeNumber: 400 })
+  })
+
   test("inline data still finishes in create with fast acknowledgement", async () => {
     const user = await testUtils.createUser("native-upload-fast-ack-inline@example.com")
     const account = await testUtils.createSessionForUser(user.id)

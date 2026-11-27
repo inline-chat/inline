@@ -73,6 +73,11 @@ const MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION = 2n * 1_024n * 1_024n * 1_02
 const FINISH_SETTLE_MS = 30_000
 /** Shutdown waits this long for writes behind acknowledged parts (Fly allows 45 s). */
 const SHUTDOWN_DRAIN_MS = 25_000
+/**
+ * A part for an unknown upload waits this long for its create: a client that picked the upload ID
+ * sends parts right behind the create, and they can reach their handler first.
+ */
+const EARLY_PART_CREATE_WAIT_MS = 3_000
 
 const kindFor = (kind: UploadKind): InlineUploadKind | undefined => {
   switch (kind) {
@@ -111,6 +116,7 @@ const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
   const partCount = Number((input.byteCount + BigInt(INLINE_TRANSFER_PART_SIZE - 1)) /
     BigInt(INLINE_TRANSFER_PART_SIZE))
   if (partCount < 1 || partCount > INLINE_UPLOAD_MAX_PARTS) return badRequest()
+  if (input.uploadId !== undefined && input.uploadId.length !== 16) return badRequest()
   if (input.thumbnailFileUniqueId !== undefined &&
       (input.thumbnailFileUniqueId.length < 1 || input.thumbnailFileUniqueId.length > 128 ||
        (kind !== "video" && kind !== "document"))) return badRequest()
@@ -208,6 +214,8 @@ export type NativeUploadOperationsOptions = {
   intake?: UploadPartIntake
   /** Accepts parts sent in pieces (SaveUploadPartInput.offset); needs `intake`. */
   pieces?: UploadPieceAssembler
+  /** See EARLY_PART_CREATE_WAIT_MS. */
+  earlyPartCreateWaitMs?: number
 }
 
 export class NativeUploadOperations {
@@ -217,6 +225,10 @@ export class NativeUploadOperations {
   readonly #storeEarly: NativeUploadOperationsOptions["storeEarly"]
   readonly #intake: UploadPartIntake | undefined
   readonly #pieces: UploadPieceAssembler | undefined
+  /** Creates in flight by the upload ID their client picked; see EARLY_PART_CREATE_WAIT_MS. */
+  readonly #creating = new Map<string, Promise<void>>()
+  readonly #createWaiters = new Map<string, Set<() => void>>()
+  readonly #earlyPartCreateWaitMs: number
 
   constructor(
     private readonly repository: InlineUploadRepository,
@@ -233,6 +245,7 @@ export class NativeUploadOperations {
     this.#storeEarly = options.storeEarly
     this.#intake = options.intake
     this.#pieces = options.intake ? options.pieces : undefined
+    this.#earlyPartCreateWaitMs = options.earlyPartCreateWaitMs ?? EARLY_PART_CREATE_WAIT_MS
   }
 
   /** Waits, bounded, for parts acknowledged before their write; call at shutdown. */
@@ -243,6 +256,53 @@ export class NativeUploadOperations {
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
     throwIfAborted(context.signal)
     const metadata = validateCreate(input)
+    if (input.uploadId === undefined) return await this.#create(input, metadata, context)
+    // Registered before the first await, so parts sent right behind this create find it.
+    const key = Buffer.from(input.uploadId).toString("hex")
+    let settle!: () => void
+    const created = new Promise<void>((resolve) => { settle = resolve })
+    this.#creating.set(key, created)
+    for (const wake of this.#createWaiters.get(key) ?? []) wake()
+    this.#createWaiters.delete(key)
+    try {
+      return await this.#create(input, metadata, context)
+    } finally {
+      settle()
+      if (this.#creating.get(key) === created) this.#creating.delete(key)
+    }
+  }
+
+  /** Waits for a create of this upload ID that is in flight here or arrives shortly. */
+  async #awaitCreate(uploadId: Uint8Array): Promise<boolean> {
+    const key = Buffer.from(uploadId).toString("hex")
+    let inFlight = this.#creating.get(key)
+    if (!inFlight) {
+      const arrived = await new Promise<boolean>((resolve) => {
+        const waiters = this.#createWaiters.get(key) ?? new Set<() => void>()
+        this.#createWaiters.set(key, waiters)
+        const wake = () => {
+          clearTimeout(timer)
+          resolve(true)
+        }
+        const timer = setTimeout(() => {
+          waiters.delete(wake)
+          if (waiters.size === 0 && this.#createWaiters.get(key) === waiters) this.#createWaiters.delete(key)
+          resolve(false)
+        }, this.#earlyPartCreateWaitMs)
+        waiters.add(wake)
+      })
+      if (!arrived) return false
+      inFlight = this.#creating.get(key)
+    }
+    await inFlight
+    return true
+  }
+
+  async #create(
+    input: CreateUploadInput,
+    metadata: InlineUploadMetadata,
+    context: HandlerContext,
+  ): Promise<CreateUploadResult> {
     const owner = await this.#owner(context)
     throwIfAborted(context.signal)
     let result
@@ -250,7 +310,7 @@ export class NativeUploadOperations {
       result = await this.repository.create(owner, metadata, {
         maxActiveCount: MAX_ACTIVE_UPLOADS_PER_SESSION,
         maxReservedBytes: MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION,
-      })
+      }, input.uploadId)
     } catch (error) {
       if (error instanceof InlineUploadMetadataConflictError) badRequest()
       if (error instanceof InlineUploadAdmissionCapacityError) throw RealtimeRpcError.RateLimit()
@@ -549,7 +609,15 @@ export class NativeUploadOperations {
     const cached = this.#geometry.get(uploadId, owner)
     if (cached === "owner_mismatch") return badRequest()
     if (cached) return cached
-    const upload = requireValue(await this.repository.getPartGeometry(uploadId, owner))
+    let found = await this.repository.getPartGeometry(uploadId, owner)
+    if (!found && await this.#awaitCreate(uploadId)) {
+      // Sent right behind its create: that create put the geometry here, or wrote the row.
+      const created = this.#geometry.get(uploadId, owner)
+      if (created === "owner_mismatch") return badRequest()
+      if (created) return created
+      found = await this.repository.getPartGeometry(uploadId, owner)
+    }
+    const upload = requireValue(found)
     if (upload.status === "processing" || upload.status === "complete") {
       return { finishedAcceptedParts: upload.acceptedParts }
     }
@@ -619,7 +687,9 @@ export class NativeUploadOperations {
       await this.#intake!.settle(cached.uploadDbId, FINISH_SETTLE_MS)
       throwIfAborted(context.signal)
     }
-    const result = await this.repository.requestFinish(input.uploadId, owner)
+    const thumbnail = input.thumbnailFileUniqueId
+    if (thumbnail !== undefined && (thumbnail.length < 1 || thumbnail.length > 128)) return badRequest()
+    const result = await this.repository.requestFinish(input.uploadId, owner, thumbnail)
     if (result.kind !== "missing") {
       this.#geometry.drop(input.uploadId)
       if (cached && cached !== "owner_mismatch") this.#pieces?.drop(cached.uploadDbId)
