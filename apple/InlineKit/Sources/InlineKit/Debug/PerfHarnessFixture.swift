@@ -39,15 +39,32 @@ public enum PerfHarnessFixture {
              messages: 300),
   ]
 
-  /// Seeds the database once. Safe to call again.
+  /// Seeds the database once. Safe to call again: later launches take away what journeys added since.
   public static func seed(_ database: AppDatabase = .shared) {
     do {
       try database.dbWriter.write { db in
-        guard try User.fetchOne(db, id: me) == nil else { return }
+        guard try User.fetchOne(db, id: me) == nil else {
+          try pruneJourneyAdditions(db)
+          return
+        }
         try seed(db)
       }
     } catch {
       Log.scoped("PerfHarnessFixture").error("Perf harness seed failed", error: error)
+    }
+  }
+
+  /// Messages journeys added (received, sent, streamed: ids past each chat's seeded ones, and pending sends' negative
+  /// ids) go at the next launch, so every run starts from the seed. Left there, they piled up at the chats' newest
+  /// ends and changed what later runs measured (`rich-select` picked other blocks: 1 pass in 5, 2026-11-27).
+  private static func pruneJourneyAdditions(_ db: Database) throws {
+    // The seeded count of each chat: `chats`, Agent Notes (`seedRichChat`, 160) and Media Lab (`seedMediaChat`, 24).
+    let seeded = chats.map { ($0.id, Int64($0.messages)) } + [(richChatId, Int64(160)), (mediaChatId, Int64(24))]
+    for (chatId, count) in seeded {
+      _ = try Message
+        .filter(Column("chatId") == chatId && (Column("messageId") > count || Column("messageId") < 0))
+        .deleteAll(db)
+      _ = try Chat.filter(Column("id") == chatId).updateAll(db, Column("lastMsgId").set(to: count))
     }
   }
 
@@ -154,6 +171,371 @@ public enum PerfHarnessFixture {
       try dialog.save(db)
     }
     try seedBridgeChat(db, now: now)
+    if CommandLine.arguments.contains("--timeline-journey") { try seedRichChat(db, now: now) }
+    if mediaRequested { try seedMediaChat(db, now: now) }
+  }
+
+  // MARK: - Media, cards and service rows (timeline journey `media` only)
+
+  /// `--perf-harness-media`: "Media Lab", the row kinds the other chats lack (photos, videos, documents with and
+  /// without a thumbnail, link previews and a task in the attachments stack, reply-thread cards, service messages),
+  /// each sent once by others and once by the fixture user. Local drawn files only; nothing loads from a network.
+  public static var mediaRequested: Bool { CommandLine.arguments.contains("--perf-harness-media") }
+  public static let mediaChatId: Int64 = 804
+
+  private static func seedMediaChat(_ db: Database, now: Date) throws {
+    var chat = Chat(
+      id: mediaChatId, date: now, type: .thread, title: "Media Lab", spaceId: spaceId, peerUserId: nil, emoji: "🖼️"
+    )
+    try chat.save(db)
+    for userId in [me, 2, 3] {
+      try ChatParticipant(chatId: mediaChatId, userId: userId, date: now).save(db)
+    }
+    let kinds = 12
+    let count = Int64(kinds * 2)
+    for messageId in Int64(1) ... count {
+      let index = Int(messageId - 1)
+      let kind = index % kinds
+      // First round from others (Ava and Ben in turns), second from the fixture user.
+      let out = index >= kinds
+      let from: Int64 = out ? me : (kind % 2 == 0 ? 2 : 3)
+      let id = 10_000 + messageId
+      var text: String?
+      var photoId: Int64?
+      var videoId: Int64?
+      var documentId: Int64?
+      var payload: Client_MessageContentPayload?
+      var preview: UrlPreview?
+      var task: ExternalTask?
+
+      func photo(tall: Bool, number: Int64) throws -> Photo {
+        let photo = try Photo(photoId: number, date: now, format: .jpeg).insertAndFetch(db)
+        var size = PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: tall ? 1_600 : 800)
+        size.localPath = DebugChatFixture.photoFile(tall: tall)
+        try size.insert(db)
+        return photo
+      }
+
+      switch kind {
+        case 0:
+          text = "Media Lab: photos, videos, files, links, tasks, thread cards and service rows, once each way."
+        case 1:
+          photoId = try photo(tall: false, number: 9_400_000 + id).photoId
+        case 2:
+          photoId = try photo(tall: true, number: 9_400_000 + id).photoId
+          text = "From the offsite"
+        case 3, 10:
+          let thumbnail = try photo(tall: false, number: 9_500_000 + id)
+          let video = Video(
+            videoId: 7_400_000 + id, date: now, width: 1_280, height: 720, duration: kind == 3 ? 12 : 95, size: 1_000,
+            thumbnailPhotoId: thumbnail.id, cdnUrl: nil, localPath: DebugChatFixture.videoFile()
+          )
+          try video.insert(db)
+          videoId = video.videoId
+          text = kind == 10 ? "Screen recording of the fling" : nil
+        case 4, 5:
+          let thumbnail = kind == 5 ? try photo(tall: false, number: 9_600_000 + id) : nil
+          let document = Document(
+            id: 6_400_000 + id, documentId: 6_400_000 + id, date: now,
+            fileName: kind == 5 ? "row-cost-mockups.png" : "timeline-notes.pdf",
+            mimeType: kind == 5 ? "image/png" : "application/pdf", size: kind == 5 ? 1_480_000 : 248_000,
+            cdnUrl: nil, localPath: nil, thumbnailPhotoId: thumbnail?.id
+          )
+          try document.insert(db)
+          documentId = document.documentId
+          text = kind == 5 ? "Mockups attached" : nil
+        case 6, 7:
+          let withPhoto = kind == 6
+          text = "Write-up: https://example.com/notes/row-cost-\(messageId)"
+          preview = UrlPreview(
+            id: 8_400_000 + id, url: "https://example.com/notes/row-cost-\(messageId)", siteName: "Example Notes",
+            title: "How we cut the row cost in half",
+            description: "Frame layout, pooled parts and fewer rebuilds: what moved the numbers and what didn't.",
+            photoId: withPhoto ? try photo(tall: false, number: 9_700_000 + id).photoId : nil, duration: nil
+          )
+        case 8:
+          text = "Thread for the scroll regressions"
+          payload = .with {
+            $0.replies = .with {
+              $0.chatID = 9_800 + messageId
+              $0.replyCount = out ? 2 : 7
+              $0.recentReplierUserIds = out ? [2] : [2, 3, 1]
+            }
+          }
+        case 9:
+          text = "Pinned a message"
+          payload = .with { $0.serviceMessage = .with { $0.pinnedMessage = .with { $0.messageID = messageId - 2 } } }
+        default:
+          text = "Tracking it here"
+          task = try ExternalTask(
+            application: "linear", taskId: "INL-\(700 + messageId)", status: out ? .inProgress : .todo,
+            assignedUserId: 2, url: "https://linear.app/inline/issue/INL-\(700 + messageId)",
+            title: "Measure the cell build on media rows", date: now, number: "INL-\(700 + messageId)"
+          ).insertAndFetch(db)
+      }
+
+      let message = try Message(
+        messageId: messageId, fromId: from, date: now.addingTimeInterval(Double(messageId - count) * 600), text: text,
+        peerUserId: nil, peerThreadId: mediaChatId, chatId: mediaChatId, out: out, status: out ? .sent : nil,
+        photoId: photoId, videoId: videoId, documentId: documentId, contentPayload: payload
+      ).insertAndFetch(db)
+      if let preview {
+        try preview.insert(db)
+      }
+      if preview != nil || task != nil {
+        try Attachment(
+          messageId: message.globalId, externalTaskId: task?.id, urlPreviewId: preview?.id, attachmentId: 8_500_000 + id
+        ).insert(db)
+      }
+    }
+    chat.lastMsgId = count
+    try chat.save(db)
+    var dialog = Dialog(optimisticForChat: chat)
+    dialog.open = true
+    dialog.unreadCount = 0
+    dialog.readInboxMaxId = count
+    dialog.serverReadInboxMaxId = count
+    dialog.readOutboxMaxId = count
+    try dialog.save(db)
+  }
+
+  // MARK: - Rich blocks (timeline journey only)
+
+  /// "Agent Notes": 160 messages, every other one rich (heading, lists, code, a quote, a table), the rest plain,
+  /// with message 40 pinned. Seeded only with `--timeline-journey`, so the perf journeys' sidebar is unchanged.
+  public static let richChatId: Int64 = 803
+
+  private static func seedRichChat(_ db: Database, now: Date) throws {
+    var chat = Chat(
+      id: richChatId, date: now, type: .thread, title: "Agent Notes", spaceId: spaceId, peerUserId: nil, emoji: "🤖"
+    )
+    try chat.save(db)
+    for userId in [me, 2, 5] {
+      try ChatParticipant(chatId: richChatId, userId: userId, date: now).save(db)
+    }
+    var rng = SplitMix64(seed: 0x5EED_0803)
+    let count: Int64 = 160
+    for messageId in Int64(1) ... count {
+      let date = now.addingTimeInterval(Double(messageId - count) * 240)
+      let rich = messageId % 2 == 0
+      let built = rich ? richText(&rng, index: Int(messageId)) : (makeText(&rng).text, nil)
+      let message = Message(
+        messageId: messageId, fromId: rich ? 5 : [me, 2][rng.next(2)], date: date, text: built.0,
+        peerUserId: nil, peerThreadId: richChatId, chatId: richChatId, out: !rich && messageId % 3 == 0,
+        blockContentPayload: built.1
+      )
+      try message.insert(db)
+    }
+    try PinnedMessage(chatId: richChatId, messageId: 40, position: 0).insert(db)
+    chat.lastMsgId = count
+    try chat.save(db)
+    var dialog = Dialog(optimisticForChat: chat)
+    dialog.open = true
+    dialog.unreadCount = 0
+    dialog.readInboxMaxId = count
+    dialog.serverReadInboxMaxId = count
+    dialog.readOutboxMaxId = count
+    try dialog.save(db)
+  }
+
+  /// A rich agent reply: the blocks are ranges into the text, as the server sends them.
+  private static func richText(_ rng: inout SplitMix64, index: Int) -> (String, BlockContentPayload?) {
+    var text = ""
+    func span(_ part: String) -> InlineProtocol.BlockText {
+      if !text.isEmpty { text += "\n" }
+      let offset = text.utf16.count
+      text += part
+      return .with {
+        $0.offset = Int64(offset)
+        $0.length = Int64(part.utf16.count)
+      }
+    }
+    func paragraph(_ part: String) -> InlineProtocol.Block { .with { $0.paragraph = span(part) } }
+    var blocks: [InlineProtocol.Block] = []
+    blocks.append(.with { $0.heading = .with { $0.text = span("Step \(index / 2): \(words[rng.next(words.count)]) review"); $0.level = 2 } })
+    blocks.append(paragraph(sentences[rng.next(sentences.count)] + " " + sentences[rng.next(sentences.count)]))
+    let kind = index / 2 % 4
+    if kind == 0 || kind == 2 {
+      blocks.append(.with {
+        $0.list = .with {
+          $0.kind = kind == 0 ? .unordered : .ordered
+          $0.items = (0 ..< 3).map { _ in .with { $0.children = [paragraph(sentences[rng.next(sentences.count)])] } }
+        }
+      })
+    }
+    if kind == 1 || kind == 2 {
+      blocks.append(.with {
+        $0.code = .with {
+          $0.text = span("func measure(width: CGFloat) -> CGSize {\n  let plan = cache[width] ?? layout(width)\n  return plan.size\n}")
+          $0.language = "swift"
+        }
+      })
+    }
+    if kind == 3 {
+      blocks.append(.with { $0.quote = .with { $0.children = [paragraph(sentences[rng.next(sentences.count)])] } })
+      blocks.append(.with {
+        $0.table = .with {
+          $0.alignments = [.left, .right, .center]
+          $0.rows = [["Case", "Before", "After"], ["open", "212 ms", "48 ms"], ["fling", "9 ms", "4 ms"]].map { row in
+            .with { $0.cells = row.map(span) }
+          }
+        }
+      })
+    }
+    blocks.append(paragraph(sentences[rng.next(sentences.count)]))
+    return (text, BlockContentPayload(.with { $0.blocks = blocks }))
+  }
+
+  // MARK: - Streaming a rich reply
+
+  private static let richStreamParagraphWords = "Rolling the cache change out in three passes so each one can be checked against the numbers before the next one starts".split(separator: " ").map(String.init)
+  private static let richStreamItems = [
+    "Measure the open path on the seeded chats",
+    "Turn the cache on for the main list and compare",
+    "Watch the resize journey for dropped frames",
+    "Remove the old path once both lists match",
+  ]
+  private static let richStreamClosingWords = "If any pass regresses the open time it goes back and the next one waits for a fix".split(separator: " ").map(String.init)
+  private static let richStreamCodeLines = [
+    "func rollOut(_ pass: Pass) async throws {",
+    "  let before = try await measure(pass.journey)",
+    "  try await pass.enable()",
+    "  let after = try await measure(pass.journey)",
+    "  guard after.openTime <= before.openTime * 1.02 else {",
+    "    try await pass.disable()",
+    "    throw RolloutError.regressed(pass, before: before, after: after)",
+    "  }",
+    "}",
+  ]
+  private static let richStreamTableRows = [
+    ["Pass", "Open time", "Hitches", "Status"],
+    ["1 · open path", "212 ms", "0", "done"],
+    ["2 · main list", "198 ms", "1", "done"],
+    ["3 · resize", "201 ms", "0", "running"],
+    ["4 · cleanup", "—", "—", "waiting"],
+  ]
+
+  /// Code lines and table rows arrive a few at a time, as an agent's edits bring them: these many per snapshot.
+  private static let richStreamCodeChunk = 3
+  private static let richStreamTableChunks = [2, 2, 1]
+
+  /// The steps of `richStreamSnapshot` that add code lines and table rows, for captures mid-way.
+  public static var richStreamCodeAndTableSteps: (code: Range<Int>, table: Range<Int>) {
+    let codeStart = richStreamParagraphWords.count + richStreamItems.count + richStreamClosingWords.count
+    let codeSteps = (richStreamCodeLines.count + richStreamCodeChunk - 1) / richStreamCodeChunk
+    let tableStart = codeStart + codeSteps
+    return (codeStart ..< tableStart, tableStart ..< tableStart + richStreamTableChunks.count)
+  }
+
+  /// A rich agent reply as it streams, at `step`: a heading, a paragraph growing word by word, a list growing item by
+  /// item, a closing paragraph growing, then a code block growing three lines at a time and a table two rows, two rows
+  /// and one (the reveal still shows them a line and a row at a time). Each
+  /// snapshot's text extends the last one's (an agent streams by editing its message with ever-longer snapshots), and
+  /// the blocks are ranges into it, as the server sends them.
+  public static func richStreamSnapshot(step: Int) -> (text: String, blocks: BlockContentPayload?, steps: Int) {
+    let paragraphWords = richStreamParagraphWords
+    let items = richStreamItems
+    let closingWords = richStreamClosingWords
+    let codeLines = richStreamCodeLines
+    let tableRows = richStreamTableRows
+    let parts = richStreamCodeAndTableSteps
+    let steps = parts.table.upperBound
+    let step = max(0, min(step, steps - 1))
+    var text = ""
+    func span(_ part: String) -> InlineProtocol.BlockText {
+      if !text.isEmpty { text += "\n" }
+      let offset = text.utf16.count
+      text += part
+      return .with {
+        $0.offset = Int64(offset)
+        $0.length = Int64(part.utf16.count)
+      }
+    }
+    func paragraph(_ part: String) -> InlineProtocol.Block { .with { $0.paragraph = span(part) } }
+    var blocks: [InlineProtocol.Block] = []
+    blocks.append(.with { $0.heading = .with { $0.text = span("Rollout plan"); $0.level = 2 } })
+    let shownWords = min(paragraphWords.count, step + 1)
+    blocks.append(paragraph(paragraphWords.prefix(shownWords).joined(separator: " ")))
+    let shownItems = max(0, min(items.count, step + 1 - paragraphWords.count))
+    if shownItems > 0 {
+      blocks.append(.with {
+        $0.list = .with {
+          $0.kind = .unordered
+          $0.items = items.prefix(shownItems).map { item in .with { $0.children = [paragraph(item)] } }
+        }
+      })
+    }
+    let shownClosing = max(0, min(closingWords.count, step + 1 - paragraphWords.count - items.count))
+    if shownClosing > 0 { blocks.append(paragraph(closingWords.prefix(shownClosing).joined(separator: " "))) }
+    let shownCode = step < parts.code.lowerBound
+      ? 0 : min(codeLines.count, (min(step, parts.code.upperBound - 1) - parts.code.lowerBound + 1) * richStreamCodeChunk)
+    if shownCode > 0 {
+      blocks.append(.with {
+        $0.code = .with {
+          $0.text = span(codeLines.prefix(shownCode).joined(separator: "\n"))
+          $0.language = "swift"
+        }
+      })
+    }
+    let shownRows = step < parts.table.lowerBound
+      ? 0 : richStreamTableChunks.prefix(step - parts.table.lowerBound + 1).reduce(0, +)
+    if shownRows > 0 {
+      let rows = tableRows.prefix(shownRows).map { row in row.map(span) }
+      blocks.append(.with { $0.table = .with { table in table.rows = rows.map { cells in .with { $0.cells = cells } } } })
+    }
+    return (text, BlockContentPayload(.with { $0.blocks = blocks }), steps)
+  }
+
+  /// A long rich agent reply (for reading mid-way through a resize): a heading every eight paragraphs, each paragraph
+  /// two to four sentences, `paragraphs` in all.
+  public static func richLongSnapshot(paragraphs: Int = 48) -> (text: String, blocks: BlockContentPayload?) {
+    let sentences = [
+      "The open path reads the window from the database before the first frame.",
+      "Rows are planned at the column's width and cached by message.",
+      "A fling bakes its path once at the lift and runs on the render server.",
+      "Streaming edits reveal at the rate they arrive, a line at a time.",
+      "Pins follow every motion on the same clock as the content.",
+      "Live resize keeps the reading row, and inside a tall message the passage.",
+      "Reactions keep the row's cell, and the bar fades in as the bubble grows.",
+    ]
+    var text = ""
+    func span(_ part: String) -> InlineProtocol.BlockText {
+      if !text.isEmpty { text += "\n" }
+      let offset = text.utf16.count
+      text += part
+      return .with {
+        $0.offset = Int64(offset)
+        $0.length = Int64(part.utf16.count)
+      }
+    }
+    var blocks: [InlineProtocol.Block] = []
+    for index in 0 ..< paragraphs {
+      if index % 8 == 0 {
+        blocks.append(.with { $0.heading = .with { $0.text = span("Part \(index / 8 + 1)"); $0.level = 2 } })
+      }
+      let count = 2 + index % 3
+      let body = (0 ..< count).map { sentences[(index * 3 + $0) % sentences.count] }.joined(separator: " ")
+      blocks.append(.with { $0.paragraph = span("\(index + 1). " + body) })
+    }
+    return (text, BlockContentPayload(.with { $0.blocks = blocks }))
+  }
+
+  /// Edits a message's text and blocks as the server's edit update does.
+  public static func editRichMessage(
+    peer: Peer, messageId: Int64, text: String, blocks: BlockContentPayload?, database: AppDatabase = .shared
+  ) throws -> Bool {
+    try database.dbWriter.write { db -> Bool in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer),
+            var message = try Message.fetchOne(db, key: ["messageId": messageId, "chatId": chat.id])
+      else { return false }
+      message.text = text
+      message.entities = nil
+      message.blockContentPayload = blocks
+      message.editDate = Date()
+      message.rev += 1
+      try message.saveMessage(db, publishChanges: true)
+      return true
+    }
   }
 
   // MARK: - Read journey
@@ -205,6 +587,133 @@ public enum PerfHarnessFixture {
           unreadMark: $0.unreadMark == true
         )
       }
+    }
+  }
+
+  // MARK: - Timeline journey (`--timeline-journey`)
+
+  /// A chat message's stable row id (`FullMessage.id`: its global id) and text.
+  public struct MessageRef: Sendable, Equatable {
+    public let messageId: Int64
+    public let globalId: Int64
+    public let text: String
+  }
+
+  /// The chat's messages with ids in `ids` (all of them when nil), oldest first.
+  public static func messages(peer: Peer, ids: [Int64]? = nil, database: AppDatabase = .shared) throws -> [MessageRef] {
+    try database.reader.read { db in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return [] }
+      var request = Message.filter(Column("chatId") == chat.id)
+      if let ids { request = request.filter(ids.contains(Column("messageId"))) }
+      return try request.order(Column("date").asc, Column("messageId").asc).fetchAll(db).compactMap { message in
+        message.globalId.map { MessageRef(messageId: message.messageId, globalId: $0, text: message.text ?? "") }
+      }
+    }
+  }
+
+  /// The newest message, by date.
+  public static func newestMessage(peer: Peer, database: AppDatabase = .shared) throws -> MessageRef? {
+    try database.reader.read { db in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer),
+            let message = try Message.filter(Column("chatId") == chat.id)
+            .order(Column("date").desc, Column("messageId").desc).fetchOne(db),
+            let globalId = message.globalId
+      else { return nil }
+      return MessageRef(messageId: message.messageId, globalId: globalId, text: message.text ?? "")
+    }
+  }
+
+  /// An edit landing as `UpdateEditMessage` lands one: the text replaced, saved, and published
+  /// (`messageUpdated`, not animated) once the write commits. Streaming agent messages arrive as a
+  /// run of these. False without the message.
+  @discardableResult
+  public static func editMessage(peer: Peer, messageId: Int64, text: String, database: AppDatabase = .shared) throws -> Bool {
+    try database.dbWriter.write { db -> Bool in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer),
+            var message = try Message.fetchOne(db, key: ["messageId": messageId, "chatId": chat.id])
+      else { return false }
+      message.text = text
+      message.entities = nil
+      message.editDate = Date()
+      message.rev += 1
+      try message.saveMessage(db, publishChanges: true)
+      return true
+    }
+  }
+
+  /// Adds `userId`'s reaction to a message, or takes it off when it's there, as the app's reaction transaction does:
+  /// saved, then the message published as updated (animated) on the main actor.
+  public static func toggleReaction(
+    peer: Peer, messageId: Int64, emoji: String, userId: Int64, database: AppDatabase = .shared
+  ) throws {
+    let chatId: Int64? = try database.dbWriter.write { db -> Int64? in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return nil }
+      let existing = Reaction.filter(Column("chatId") == chat.id && Column("messageId") == messageId)
+        .filter(Column("userId") == userId && Column("emoji") == emoji)
+      if try existing.fetchCount(db) > 0 {
+        _ = try existing.deleteAll(db)
+      } else {
+        _ = try Reaction.save(
+          db, reaction: Reaction(messageId: messageId, userId: userId, emoji: emoji, date: Date(), chatId: chat.id)
+        )
+      }
+      return chat.id
+    }
+    guard let chatId else { return }
+    Task { @MainActor in
+      MessagesPublisher.shared.messageUpdatedWithId(messageId: messageId, chatId: chatId, peer: peer, animated: true)
+    }
+  }
+
+  /// Deletes as the server's delete update does: the rows go, then `messagesDeleted` on the main actor.
+  public static func deleteMessages(peer: Peer, messageIds: [Int64], database: AppDatabase = .shared) throws {
+    try database.dbWriter.write { db in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return }
+      try Message.deleteMessages(db, messageIds: messageIds, chatId: chat.id)
+      db.afterNextTransaction { _ in
+        Task { @MainActor in MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peer) }
+      }
+    }
+  }
+
+  /// The optimistic half of a send, as `SendMessageTransaction.optimistic()` does it: a row with a
+  /// temporary negative id, sending, from the fixture user, then `messageAddedSync` on the main actor.
+  /// Returns the send's random id and the row's stable id.
+  public static func insertPendingSend(
+    peer: Peer, text: String, database: AppDatabase = .shared
+  ) async throws -> (randomId: Int64, globalId: Int64)? {
+    let randomId = Int64.random(in: 1 ... Int64.max / 2)
+    let full = try await database.dbWriter.write { db -> FullMessage? in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return nil }
+      let message = Message(
+        messageId: -randomId, randomId: randomId, fromId: me, date: Date(), text: text,
+        peerUserId: peer.asUserId(), peerThreadId: peer.asThreadId(), chatId: chat.id, out: true, status: .sending
+      )
+      try message.save(db)
+      try Chat.updateLastMsgId(db, chatId: chat.id, lastMsgId: message.messageId, date: message.date)
+      return try FullMessage.queryRequest()
+        .filter(Column("messageId") == message.messageId).filter(Column("chatId") == chat.id).fetchOne(db)
+    }
+    guard let full, let globalId = full.message.globalId else { return nil }
+    await MessagesPublisher.shared.messageAddedSync(fullMessage: full, peer: peer)
+    return (randomId, globalId)
+  }
+
+  /// The server's acknowledgement of a send, as `UpdateMessageId.apply` lands it: the pending row takes
+  /// the next real id and `sent`, published once it commits. Returns the real id.
+  public static func confirmSend(peer: Peer, randomId: Int64, database: AppDatabase = .shared) throws -> Int64? {
+    try database.dbWriter.write { db -> Int64? in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer),
+            var message = try Message.fetchOne(db, key: ["fromId": me, "randomId": randomId])
+      else { return nil }
+      let newest = try Message.filter(Column("chatId") == chat.id && Column("messageId") > 0)
+        .order(Column("messageId").desc).fetchOne(db)?.messageId ?? 0
+      message.status = .sent
+      message.messageId = newest + 1
+      message.randomId = nil
+      try message.saveMessage(db, onConflict: .replace, publishChanges: true)
+      try Chat.updateLastMsgId(db, chatId: chat.id, lastMsgId: message.messageId, date: message.date)
+      return message.messageId
     }
   }
 

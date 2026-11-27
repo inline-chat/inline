@@ -309,7 +309,7 @@ public final class DebugChatFixture {
   }
 
   /// A stand-in video file in the video cache (not playable); its local path.
-  private nonisolated static func videoFile() -> String? {
+  nonisolated static func videoFile() -> String? {
     let name = "debug-fixture-video.mp4"
     let url = FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(name)
     if !FileManager.default.fileExists(atPath: url.path) {
@@ -319,7 +319,7 @@ public final class DebugChatFixture {
   }
 
   /// A drawn JPEG in the photo cache (a diagonal gradient), written once per shape; its local path.
-  private nonisolated static func photoFile(tall: Bool) -> String? {
+  nonisolated static func photoFile(tall: Bool) -> String? {
     let name = tall ? "debug-fixture-tall.jpg" : "debug-fixture-wide.jpg"
     let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(name)
     if FileManager.default.fileExists(atPath: url.path) { return name }
@@ -355,6 +355,39 @@ public final class DebugChatFixture {
     }
     remoteFloor = lower
     return true
+  }
+
+  /// Leaves the cache as paging back to the saved place does when a stray row sits below it (a
+  /// reply's quoted message, a pin): history is known from 20 rows under the place up, and one
+  /// row 35 under it is cached across the hole. The place used to be dropped for that row.
+  ///
+  /// With `rowsAfter`, the known history also ends that many rows after the place, as a jump's
+  /// window does, and only the newest 30 messages are cached past the hole.
+  public func strandSavedPlace(rowsAfter: Int64? = nil) throws {
+    let floor = max(1, savedPlace.messageId - 20)
+    let stray = max(1, savedPlace.messageId - 35)
+    let ceiling = rowsAfter.map { savedPlace.messageId + $0 }
+    let tail = nextMessageId - 30
+    let chatId = chatId
+    try database.dbWriter.write { db in
+      _ = try Message
+        .filter(Column("chatId") == chatId && Column("messageId") < floor && Column("messageId") != stray)
+        .deleteAll(db)
+      try MessageHistoryCoverageStore.invalidate(db, chatId: chatId)
+      if let ceiling, ceiling < tail {
+        _ = try Message
+          .filter(Column("chatId") == chatId && Column("messageId") > ceiling && Column("messageId") < tail)
+          .deleteAll(db)
+        try MessageHistoryCoverageStore.subtract(db, chatId: chatId, lowerId: floor, upperId: ceiling)
+        try MessageHistoryCoverageStore.subtract(
+          db, chatId: chatId, lowerId: tail, upperId: MessageHistoryHole.positiveMessageIDMax
+        )
+      } else {
+        try MessageHistoryCoverageStore.subtract(
+          db, chatId: chatId, lowerId: floor, upperId: MessageHistoryHole.positiveMessageIDMax
+        )
+      }
+    }
   }
 
   /// Simulates fetching the history around `messageId`: remote pages arrive until it is stored.

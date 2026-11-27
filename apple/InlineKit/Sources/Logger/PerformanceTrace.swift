@@ -227,7 +227,12 @@ public enum PerformanceTrace {
     return "ios"
     #endif
   }()
-  private static let diagnosticTagValues: [String: Set<String>] = ["realtime.protocol": ["v2", "v3"]]
+  private static let diagnosticTagValues: [String: Set<String>] = [
+    "realtime.protocol": ["v2", "v3"],
+    // Which macOS message list showed the chat last: crashes and errors are filtered by it while the new list rolls
+    // out (it is an experimental setting).
+    "messages.list": ["timeline", "table"],
+  ]
   private static let maxBreadcrumbMetricMagnitude = 1_000_000_000_000.0
   private static let maxBreadcrumbMetricCount = 16
 

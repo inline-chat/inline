@@ -372,7 +372,9 @@ public final class BotChatSettingsCoordinator {
     discoveryObservation = ValueObservation
       .tracking { [peer] db in try BotChatSettingsDiscoverySnapshot.fetch(db, peer: peer) }
       .removeDuplicates()
-      .publisher(in: database.dbWriter, scheduling: .immediate)
+      // Fetched on a reader: only changes after the first value matter, and `.immediate` made the main thread wait
+      // for a reader each time a chat route started observing (every chat open).
+      .publisher(in: database.dbWriter, scheduling: .async(onQueue: .main))
       .sink(
         receiveCompletion: { [weak self] completion in
           guard case let .failure(error) = completion else { return }
