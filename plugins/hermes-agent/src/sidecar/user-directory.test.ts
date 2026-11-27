@@ -36,14 +36,14 @@ describe("InlineUserDirectory", () => {
     })
   })
 
-  it("uses the cached chats directory for direct senders", async () => {
+  it("looks up one profile for direct senders", async () => {
     const calls: Method[] = []
     const directory = new InlineUserDirectory({
       async invokeUncheckedRaw(method) {
         calls.push(method)
         return {
-          oneofKind: "getChats",
-          getChats: { users: [user(91n, { username: "fallback" })] },
+          oneofKind: "getUsers",
+          getUsers: { users: [user(91n, { username: "fallback" })] },
         }
       },
     })
@@ -52,10 +52,10 @@ describe("InlineUserDirectory", () => {
       id: "91",
       username: "fallback",
     })
-    expect(calls).toEqual([Method.GET_CHATS])
+    expect(calls).toEqual([Method.GET_USERS])
   })
 
-  it("falls back to the directory when participants contain only an id", async () => {
+  it("looks the user up when participants contain only an id", async () => {
     const calls: Method[] = []
     const directory = new InlineUserDirectory({
       async invokeUncheckedRaw(method) {
@@ -64,8 +64,8 @@ describe("InlineUserDirectory", () => {
           return { oneofKind: "getChatParticipants", getChatParticipants: { users: [user(42n)] } }
         }
         return {
-          oneofKind: "getChats",
-          getChats: { users: [user(42n, { firstName: "Ada", username: "ada" })] },
+          oneofKind: "getUsers",
+          getUsers: { users: [user(42n, { firstName: "Ada", username: "ada" })] },
         }
       },
     })
@@ -74,7 +74,7 @@ describe("InlineUserDirectory", () => {
       firstName: "Ada",
       username: "ada",
     })
-    expect(calls).toEqual([Method.GET_CHAT_PARTICIPANTS, Method.GET_CHATS])
+    expect(calls).toEqual([Method.GET_CHAT_PARTICIPANTS, Method.GET_USERS])
   })
 
   it("deduplicates concurrent hydration and retries failures", async () => {
@@ -121,8 +121,8 @@ describe("InlineUserDirectory", () => {
       async invokeUncheckedRaw() {
         requests += 1
         return {
-          oneofKind: "getChats",
-          getChats: { users: [user(1n, { firstName: `Name ${requests}` })] },
+          oneofKind: "getUsers",
+          getUsers: { users: [user(1n, { firstName: `Name ${requests}` })] },
         }
       },
     }, { ttlMs: 10, maxProfiles: 2, now: () => now })
@@ -159,8 +159,8 @@ it.each([false, true])("a consistently slow directory can recover after an initi
   try {
     const directory = new InlineUserDirectory({
       async invokeUncheckedRaw(method, _input, options) {
-        const kind = method === Method.GET_CHAT_PARTICIPANTS ? "getChatParticipants" : "getChats"
-        if (!direct && method === Method.GET_CHATS) return {oneofKind: kind, [kind]: {users: []}}
+        const kind = method === Method.GET_CHAT_PARTICIPANTS ? "getChatParticipants" : "getUsers"
+        if (!direct && method === Method.GET_USERS) return {oneofKind: kind, [kind]: {users: []}}
         let responseTimer: ReturnType<typeof setTimeout> | undefined
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined
         try {

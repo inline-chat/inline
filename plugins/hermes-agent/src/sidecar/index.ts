@@ -1353,6 +1353,11 @@ function normalizePositiveMb(value: string | undefined, fallback: number, name: 
   return parsed
 }
 
+const MOCK_DIRECTORY_USERS = [
+  { id: 42n, firstName: "Grace", lastName: "Hopper", username: "grace" },
+  { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" },
+]
+
 class MockInlineClient implements SidecarClient {
   private closed = false
   private messageId = 9000n
@@ -1652,12 +1657,15 @@ class MockInlineClient implements SidecarClient {
     if (method === Method.GET_CHATS) {
       return {
         oneofKind: "getChats",
-        getChats: {
-          users: [
-            { id: 42n, firstName: "Grace", lastName: "Hopper", username: "grace" },
-            { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" },
-          ],
-        },
+        getChats: { users: MOCK_DIRECTORY_USERS },
+      }
+    }
+    if (method === Method.GET_USERS) {
+      const request = input as { getUsers?: { userIds?: bigint[] } } | undefined
+      const wanted = new Set((request?.getUsers?.userIds ?? []).map(String))
+      return {
+        oneofKind: "getUsers",
+        getUsers: { users: MOCK_DIRECTORY_USERS.filter((user) => wanted.has(String(user.id))) },
       }
     }
     if (method === Method.ADD_REACTION) {

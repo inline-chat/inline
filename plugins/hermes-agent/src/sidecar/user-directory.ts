@@ -37,8 +37,8 @@ export class InlineUserDirectory {
   private readonly lookupTimeouts = new Map<Method, number>()
   private readonly hydratedChats = new Map<string, number>()
   private readonly chatFetches = new Map<string, Promise<boolean>>()
-  private directoryExpiresAt = 0
-  private directoryFetch: Promise<boolean> | null = null
+  private readonly fetchedUsers = new Map<string, number>()
+  private readonly userFetches = new Map<string, Promise<boolean>>()
   private readonly ttlMs: number
   private readonly maxProfiles: number
   private readonly now: () => number
@@ -70,7 +70,7 @@ export class InlineUserDirectory {
     }
 
     if (params.direct) {
-      const directoryHydrated = await this.hydrateDirectory()
+      const directoryHydrated = await this.hydrateUser(params.userId)
       const resolved = this.getFresh(userId)
       return {
         ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
@@ -86,9 +86,9 @@ export class InlineUserDirectory {
         }
       }
       // Participant payloads can be partial (especially for reply threads), so
-      // this deliberate extra directory fetch fills the miss. Both RPC paths
+      // this deliberate extra profile fetch fills the miss. Both RPC paths
       // are TTL-cached and in-flight deduplicated to avoid a per-message fetch.
-      const directoryHydrated = await this.hydrateDirectory()
+      const directoryHydrated = await this.hydrateUser(params.userId)
       const resolved = this.getFresh(userId)
       return {
         ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
@@ -122,7 +122,7 @@ export class InlineUserDirectory {
     }
     if (evicted) {
       this.hydratedChats.clear()
-      this.directoryExpiresAt = 0
+      this.fetchedUsers.clear()
     }
   }
 
@@ -175,7 +175,7 @@ export class InlineUserDirectory {
     return await fetch
   }
 
-  private async invokeLookup(method: Method.GET_CHAT_PARTICIPANTS | Method.GET_CHATS, input: unknown): Promise<unknown> {
+  private async invokeLookup(method: Method.GET_CHAT_PARTICIPANTS | Method.GET_USERS, input: unknown): Promise<unknown> {
     const timeoutMs = this.lookupTimeouts.get(method) ?? 1_500
     try {
       return await this.client.invokeUncheckedRaw(method, input, { timeoutMs })
@@ -189,28 +189,36 @@ export class InlineUserDirectory {
     }
   }
 
-  private async hydrateDirectory(): Promise<boolean> {
-    if (this.directoryExpiresAt > this.now()) return true
-    if (this.directoryFetch) return this.directoryFetch
+  /** One public profile through GET_USERS, never the account's whole chat catalog. */
+  private async hydrateUser(userId: bigint): Promise<boolean> {
+    const key = userId.toString()
+    const fetchedUntil = this.fetchedUsers.get(key) ?? 0
+    if (fetchedUntil > this.now()) return true
+    const existing = this.userFetches.get(key)
+    if (existing) return existing
 
     const fetch = (async () => {
-      const result = await this.invokeLookup(Method.GET_CHATS, {
-        oneofKind: "getChats",
-        getChats: {},
+      const result = await this.invokeLookup(Method.GET_USERS, {
+        oneofKind: "getUsers",
+        getUsers: { userIds: [userId] },
       })
-      this.remember(readUsers(result, "getChats"))
-      this.directoryExpiresAt = this.now() + this.ttlMs
+      this.remember(readUsers(result, "getUsers"))
+      this.fetchedUsers.delete(key)
+      this.fetchedUsers.set(key, this.now() + this.ttlMs)
+      while (this.fetchedUsers.size > this.maxProfiles) {
+        const oldest = this.fetchedUsers.keys().next().value
+        if (oldest == null) break
+        this.fetchedUsers.delete(oldest)
+      }
       return true
     })()
       .catch((error) => {
-        this.onError?.("getChats", error)
+        this.onError?.("getUsers", error)
         return false
       })
-      .finally(() => {
-        this.directoryFetch = null
-      })
+      .finally(() => this.userFetches.delete(key))
 
-    this.directoryFetch = fetch
+    this.userFetches.set(key, fetch)
     return await fetch
   }
 }
@@ -238,7 +246,7 @@ function readBooleanProfileField<K extends "bot">(
   return resolved == null ? {} : { [key]: resolved } as Record<K, boolean>
 }
 
-function readUsers(result: unknown, kind: "getChatParticipants" | "getChats"): User[] {
+function readUsers(result: unknown, kind: "getChatParticipants" | "getUsers"): User[] {
   if (!result || typeof result !== "object") return []
   const record = result as Record<string, unknown>
   const payload = record[kind]
