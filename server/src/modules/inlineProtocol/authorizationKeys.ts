@@ -5,13 +5,21 @@ import type {
 } from "@inline-chat/protocol/server"
 import { bytesToHex } from "@inline-chat/protocol/secure"
 import type { PermanentAuthorizationKey, PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
+import { Log } from "@in/server/utils/log"
 import { TemporaryAuthorizationKeyStore } from "./temporaryKeys"
 
+const log = new Log("InlineProtocol.AuthorizationKeys")
+
 /**
- * A bound temporary key re-verifies its permanent authority at most this often.
+ * A bound temporary key never relies on a permanent-authority check older than this.
  * Local revocations invalidate immediately; this bounds cross-process lag only.
  */
 export const AUTHORITY_CACHE_TTL_MS = 30_000
+/**
+ * Past this age a cached authority is still served while one background lookup refreshes it, so a
+ * busy socket never waits on Postgres in its record queue. Only an entry past the TTL blocks.
+ */
+export const AUTHORITY_REFRESH_AFTER_MS = 20_000
 const NEGATIVE_AUTHORITY_CACHE_TTL_MS = 5_000
 const MAX_AUTHORITY_CACHE_ENTRIES = 10_000
 
@@ -27,6 +35,8 @@ type AuthorityCacheEntry = {
   value: PermanentAuthority | undefined
   verifiedAt: number
   generation: number
+  /** Each entry starts at most one background refresh; a failed one is not retried before the TTL. */
+  refreshStarted?: boolean
 }
 
 export type InlineProtocolAuthorizationKeysOptions = {
@@ -178,6 +188,10 @@ export class InlineProtocolAuthorizationKeys implements ServerAuthorizationKeyRe
         // Refresh recency for LRU eviction.
         this.#authorities.delete(id)
         this.#authorities.set(id, cached)
+        if (cached.value && !cached.refreshStarted && now - cached.verifiedAt >= AUTHORITY_REFRESH_AFTER_MS) {
+          cached.refreshStarted = true
+          void this.#refreshAuthority(id, permanentAuthKeyId.slice(), cached)
+        }
         return cached.value
       }
       this.#authorities.delete(id)
@@ -194,6 +208,27 @@ export class InlineProtocolAuthorizationKeys implements ServerAuthorizationKeyRe
       }
     }
     return value
+  }
+
+  /**
+   * Replaces `entry` with a fresh lookup, including a revoked or missing key, which then fails the
+   * next check. A failed lookup keeps the entry until its TTL, when the next check blocks and retries.
+   */
+  async #refreshAuthority(id: string, permanentAuthKeyId: Uint8Array, entry: AuthorityCacheEntry): Promise<void> {
+    const generation = this.#generation
+    // Age the result from when the lookup started: a revocation after that read is not in it.
+    const startedAt = this.#nowMilliseconds()
+    try {
+      const loaded = await this.permanent.getActive(permanentAuthKeyId)
+      const value = loaded ? this.#authorityFrom(loaded) : undefined
+      // An invalidation, or a blocking lookup that replaced this entry, wins over the refresh.
+      if (generation === this.#generation && this.#authorities.get(id) === entry) {
+        this.#authorities.delete(id)
+        this.#authorities.set(id, { value, verifiedAt: startedAt, generation })
+      }
+    } catch (error) {
+      log.warn("Inline Protocol key authority refresh failed", { error })
+    }
   }
 
   #authorityFrom(loaded: PermanentAuthorizationKey): PermanentAuthority {
