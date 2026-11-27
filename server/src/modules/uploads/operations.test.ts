@@ -1110,6 +1110,122 @@ describe("native upload operations", () => {
     expect(proposed.length).toBe(16)
   })
 
+  const waitingOperations = (store: MemoryPartStore, earlyPartCreateWaitMs: number) =>
+    new NativeUploadOperations(new InlineUploadRepository(), store, finalizer, () => {}, async () => {}, () => {}, {
+      intake: new UploadPartIntake(), pieces: new UploadPieceAssembler(), earlyPartCreateWaitMs,
+    })
+
+  const proposedDocument = (body: Uint8Array, seed: number, uploadId: Uint8Array) => ({
+    clientUploadId: new Uint8Array(16).fill(seed), fileName: "ahead.bin",
+    mimeType: "application/octet-stream", byteCount: BigInt(body.length),
+    sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+    metadata: { oneofKind: undefined as undefined }, uploadId,
+  })
+
+  test("a part ahead of a create that fails is rejected and nothing is stored", async () => {
+    const user = await testUtils.createUser("native-upload-ahead-create-fails@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = waitingOperations(store, 500)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([1, 2, 3])
+    // The same client upload ID with other bytes: the second create conflicts after it started.
+    await createDocument(operations, requestContext, body, 140)
+    const proposed = new Uint8Array(16).fill(0x8a)
+    const part = operations.savePart({ uploadId: proposed, partIndex: 0, data: new Uint8Array([9, 9, 9]) }, requestContext)
+    await Bun.sleep(20)
+    await expect(operations.create(proposedDocument(new Uint8Array([9, 9, 9]), 140, proposed), requestContext))
+      .rejects.toBeDefined()
+    await expect(part).rejects.toMatchObject({ codeNumber: 400 })
+    expect([...store.objects.keys()].some((key) => key.startsWith(Buffer.from(proposed).toString("hex")))).toBe(false)
+  })
+
+  test("a part whose create landed on another machine is accepted after the wait", async () => {
+    const user = await testUtils.createUser("native-upload-ahead-other-machine@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const machineA = waitingOperations(store, 200)
+    const machineB = waitingOperations(store, 200)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([4, 5, 6])
+    const proposed = new Uint8Array(16).fill(0x8b)
+    const started = Date.now()
+    const part = machineB.savePart({ uploadId: proposed, partIndex: 0, data: body }, requestContext)
+    await Bun.sleep(20)
+    const created = await machineA.create(proposedDocument(body, 141, proposed), requestContext)
+    expect(Buffer.from(created.uploadId)).toEqual(Buffer.from(proposed))
+    expect(await part).toEqual({ alreadyPresent: false })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(190)
+  })
+
+  test("a session's parts for uploads nobody creates stop waiting after a few", async () => {
+    const user = await testUtils.createUser("native-upload-ahead-cap@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = waitingOperations(new MemoryPartStore(), 400)
+    const requestContext = context(user.id, account.session.id)
+    const settle = async (index: number) => {
+      const started = Date.now()
+      try {
+        await operations.savePart({ uploadId: new Uint8Array(16).fill(0x90 + index), partIndex: 0, data: new Uint8Array(1) }, requestContext)
+      } catch {}
+      return Date.now() - started
+    }
+    const waits = await Promise.all(Array.from({ length: 10 }, (_, index) => settle(index)))
+    expect(waits.filter((ms) => ms >= 350).length).toBe(8)
+    expect(waits.filter((ms) => ms < 200).length).toBe(2)
+    // The waits are released: a later part waits again.
+    expect(await settle(20)).toBeGreaterThanOrEqual(350)
+  })
+
+  test("a part sent to another user's upload is rejected and leaves it untouched", async () => {
+    const owner = await testUtils.createUser("native-upload-ahead-owner@example.com")
+    const ownerAccount = await testUtils.createSessionForUser(owner.id)
+    const other = await testUtils.createUser("native-upload-ahead-intruder@example.com")
+    const otherAccount = await testUtils.createSessionForUser(other.id)
+    const store = new MemoryPartStore()
+    const operations = waitingOperations(store, 50)
+    const body = new Uint8Array([7, 7, 7])
+    const proposed = new Uint8Array(16).fill(0x8c)
+    const created = await operations.create(proposedDocument(body, 142, proposed), context(owner.id, ownerAccount.session.id))
+    await expect(operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: new Uint8Array([6, 6, 6]) },
+      context(other.id, otherAccount.session.id))).rejects.toMatchObject({ codeNumber: 400 })
+    // Another user proposing the same ID gets its own.
+    const theirs = await operations.create(proposedDocument(body, 143, proposed), context(other.id, otherAccount.session.id))
+    expect(Buffer.from(theirs.uploadId)).not.toEqual(Buffer.from(proposed))
+    expect(store.objects.size).toBe(0)
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, context(owner.id, ownerAccount.session.id)))
+      .toEqual({ alreadyPresent: false })
+  })
+
+  test("a create whose proposed upload ID another create is inserting falls back to its own", async () => {
+    const user = await testUtils.createUser("native-upload-ahead-race@example.com")
+    const first = await testUtils.createSessionForUser(user.id)
+    const second = await testUtils.createSessionForUser(user.id)
+    const operations = waitingOperations(new MemoryPartStore(), 50)
+    const body = new Uint8Array([3, 3, 3])
+    const proposed = new Uint8Array(16).fill(0x8d)
+    let inserted!: () => void
+    const insertedRow = new Promise<void>((resolve) => { inserted = resolve })
+    // Another create holds the proposed ID in an uncommitted insert, so the check can't see it.
+    const holder = db.transaction(async (tx) => {
+      const now = Date.now()
+      await tx.insert(inlineUploads).values({
+        uploadId: Buffer.from(proposed), clientUploadId: Buffer.alloc(16, 0x99), userId: user.id,
+        accountSessionId: first.session.id, fileName: "held.bin", mimeType: "application/octet-stream",
+        byteCount: 3n, sha256: createHash("sha256").update(body).digest(), kind: "document",
+        partSize: INLINE_TRANSFER_PART_SIZE, partCount: 1, storageFormat: "identity_v1",
+        resultFileUniqueId: "IND_held_race", expiresAt: new Date(now + 60_000), hardExpiresAt: new Date(now + 120_000),
+      })
+      inserted()
+      await Bun.sleep(300)
+    })
+    await insertedRow
+    const created = await operations.create(proposedDocument(body, 145, proposed), context(user.id, second.session.id))
+    await holder
+    expect(Buffer.from(created.uploadId)).not.toEqual(Buffer.from(proposed))
+    expect(created.uploadId.length).toBe(16)
+  })
+
   test("a document names its thumbnail at finish; a replayed create still matches it", async () => {
     const user = await testUtils.createUser("native-upload-finish-thumbnail@example.com")
     const account = await testUtils.createSessionForUser(user.id)

@@ -238,6 +238,14 @@ const sameMetadata = (row: DbInlineUpload, metadata: InlineUploadMetadata): bool
   row.hasAudio === (metadata.hasAudio ?? null) &&
   sameOptionalBytes(row.waveform, metadata.waveform)
 
+const isUniqueViolation = (error: unknown): boolean => {
+  for (let cause: unknown = error, depth = 0; cause && depth < 4; depth++) {
+    if (typeof cause === "object" && (cause as { code?: unknown }).code === "23505") return true
+    cause = typeof cause === "object" ? (cause as { cause?: unknown }).cause : undefined
+  }
+  return false
+}
+
 /** A lease older than this, measured on the database clock, may be taken over. */
 const staleLeaseCutoff = sql<Date>`CURRENT_TIMESTAMP - (${INLINE_UPLOAD_PROCESSING_LEASE_MS} * interval '1 millisecond')`
 
@@ -393,6 +401,24 @@ export class InlineUploadRepository {
     metadata: InlineUploadMetadata,
     admission?: { maxActiveCount: number; maxReservedBytes: bigint },
     /** The client's proposed upload ID (CreateUploadInput.upload_id); random when absent. */
+    proposedUploadId?: Uint8Array,
+  ): Promise<{
+    upload: InlineUploadRecord
+    created: boolean
+  }> {
+    try {
+      return await this.#create(owner, metadata, admission, proposedUploadId)
+    } catch (error) {
+      // Two creates proposing one ID at once: the second falls back to a server-picked ID.
+      if (proposedUploadId === undefined || !isUniqueViolation(error)) throw error
+      return await this.#create(owner, metadata, admission)
+    }
+  }
+
+  async #create(
+    owner: InlineUploadOwner,
+    metadata: InlineUploadMetadata,
+    admission?: { maxActiveCount: number; maxReservedBytes: bigint },
     proposedUploadId?: Uint8Array,
   ): Promise<{
     upload: InlineUploadRecord

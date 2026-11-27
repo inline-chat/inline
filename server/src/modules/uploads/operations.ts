@@ -78,6 +78,8 @@ const SHUTDOWN_DRAIN_MS = 25_000
  * sends parts right behind the create, and they can reach their handler first.
  */
 const EARLY_PART_CREATE_WAIT_MS = 3_000
+/** Parts of one session waiting for a create; beyond this a part for an unknown upload fails at once. */
+const MAX_EARLY_PART_WAITS_PER_SESSION = 8
 
 const kindFor = (kind: UploadKind): InlineUploadKind | undefined => {
   switch (kind) {
@@ -229,6 +231,7 @@ export class NativeUploadOperations {
   readonly #creating = new Map<string, Promise<void>>()
   readonly #createWaiters = new Map<string, Set<() => void>>()
   readonly #earlyPartCreateWaitMs: number
+  readonly #earlyPartWaitsBySession = new Map<number, number>()
 
   constructor(
     private readonly repository: InlineUploadRepository,
@@ -273,10 +276,15 @@ export class NativeUploadOperations {
   }
 
   /** Waits for a create of this upload ID that is in flight here or arrives shortly. */
-  async #awaitCreate(uploadId: Uint8Array): Promise<boolean> {
+  async #awaitCreate(uploadId: Uint8Array, accountSessionId: number): Promise<boolean> {
     const key = Buffer.from(uploadId).toString("hex")
     let inFlight = this.#creating.get(key)
     if (!inFlight) {
+      // Each waiting part holds its bytes; a client sending parts for uploads it never creates
+      // gets no waits beyond a few.
+      const waiting = this.#earlyPartWaitsBySession.get(accountSessionId) ?? 0
+      if (waiting >= MAX_EARLY_PART_WAITS_PER_SESSION) return false
+      this.#earlyPartWaitsBySession.set(accountSessionId, waiting + 1)
       const arrived = await new Promise<boolean>((resolve) => {
         const waiters = this.#createWaiters.get(key) ?? new Set<() => void>()
         this.#createWaiters.set(key, waiters)
@@ -290,6 +298,10 @@ export class NativeUploadOperations {
           resolve(false)
         }, this.#earlyPartCreateWaitMs)
         waiters.add(wake)
+      }).finally(() => {
+        const remaining = (this.#earlyPartWaitsBySession.get(accountSessionId) ?? 1) - 1
+        if (remaining > 0) this.#earlyPartWaitsBySession.set(accountSessionId, remaining)
+        else this.#earlyPartWaitsBySession.delete(accountSessionId)
       })
       if (!arrived) return false
       inFlight = this.#creating.get(key)
@@ -610,11 +622,14 @@ export class NativeUploadOperations {
     if (cached === "owner_mismatch") return badRequest()
     if (cached) return cached
     let found = await this.repository.getPartGeometry(uploadId, owner)
-    if (!found && await this.#awaitCreate(uploadId)) {
-      // Sent right behind its create: that create put the geometry here, or wrote the row.
-      const created = this.#geometry.get(uploadId, owner)
-      if (created === "owner_mismatch") return badRequest()
-      if (created) return created
+    if (!found) {
+      // Sent right behind its create: that create puts the geometry here. After the wait the
+      // row is read again, since the create may have landed on another machine (a reconnect).
+      if (await this.#awaitCreate(uploadId, owner.accountSessionId)) {
+        const created = this.#geometry.get(uploadId, owner)
+        if (created === "owner_mismatch") return badRequest()
+        if (created) return created
+      }
       found = await this.repository.getPartGeometry(uploadId, owner)
     }
     const upload = requireValue(found)
