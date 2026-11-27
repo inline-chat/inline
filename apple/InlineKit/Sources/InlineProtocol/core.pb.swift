@@ -29201,6 +29201,18 @@ public nonisolated struct CreateUploadResult: @unchecked Sendable {
   /// Clears the value of `complete`. Subsequent reads from it will return its default value.
   public mutating func clearComplete() {_uniqueStorage()._complete = nil}
 
+  /// Set by servers that accept a part in pieces (SaveUploadPartInput.offset). A piece starts at a
+  /// multiple of this many bytes and is a multiple of it long, except the piece that ends its part.
+  /// Clients send whole parts when it is unset.
+  public var pieceGranularity: UInt32 {
+    get {_storage._pieceGranularity ?? 0}
+    set {_uniqueStorage()._pieceGranularity = newValue}
+  }
+  /// Returns true if `pieceGranularity` has been explicitly set.
+  public var hasPieceGranularity: Bool {_storage._pieceGranularity != nil}
+  /// Clears the value of `pieceGranularity`. Subsequent reads from it will return its default value.
+  public mutating func clearPieceGranularity() {_uniqueStorage()._pieceGranularity = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -29219,11 +29231,27 @@ public nonisolated struct SaveUploadPartInput: Sendable {
 
   public var data: Data = Data()
 
+  /// Byte offset of `data` inside the part, when the part is sent in pieces (see
+  /// CreateUploadResult.piece_granularity). Unset means `data` is the whole part. The part joins
+  /// accepted_parts once all of its bytes have arrived.
+  public var offset: UInt32 {
+    get {_offset ?? 0}
+    set {_offset = newValue}
+  }
+  /// Returns true if `offset` has been explicitly set.
+  public var hasOffset: Bool {self._offset != nil}
+  /// Clears the value of `offset`. Subsequent reads from it will return its default value.
+  public mutating func clearOffset() {self._offset = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _offset: UInt32? = nil
 }
 
+/// The server replies once it holds the bytes and stores them after replying. A part it loses
+/// before storing it is reported by FINISH_UPLOAD in `missing`, and the client sends it again.
 public nonisolated struct SaveUploadPartResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -68656,7 +68684,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0\u{1}complete\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0\u{1}complete\0\u{3}piece_granularity\0")
 
   fileprivate class _StorageClass {
     var _uploadID: Data = Data()
@@ -68665,6 +68693,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
     var _expiresAt: Int64 = 0
     var _acceptedParts: [UInt32] = []
     var _complete: UploadComplete? = nil
+    var _pieceGranularity: UInt32? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -68681,6 +68710,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
       _expiresAt = source._expiresAt
       _acceptedParts = source._acceptedParts
       _complete = source._complete
+      _pieceGranularity = source._pieceGranularity
     }
   }
 
@@ -68705,6 +68735,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
         case 4: try { try decoder.decodeSingularInt64Field(value: &_storage._expiresAt) }()
         case 5: try { try decoder.decodeRepeatedUInt32Field(value: &_storage._acceptedParts) }()
         case 6: try { try decoder.decodeSingularMessageField(value: &_storage._complete) }()
+        case 7: try { try decoder.decodeSingularUInt32Field(value: &_storage._pieceGranularity) }()
         default: break
         }
       }
@@ -68735,6 +68766,9 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
       try { if let v = _storage._complete {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
       } }()
+      try { if let v = _storage._pieceGranularity {
+        try visitor.visitSingularUInt32Field(value: v, fieldNumber: 7)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -68750,6 +68784,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
         if _storage._expiresAt != rhs_storage._expiresAt {return false}
         if _storage._acceptedParts != rhs_storage._acceptedParts {return false}
         if _storage._complete != rhs_storage._complete {return false}
+        if _storage._pieceGranularity != rhs_storage._pieceGranularity {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -68761,7 +68796,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension SaveUploadPartInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SaveUploadPartInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_index\0\u{1}data\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_index\0\u{1}data\0\u{1}offset\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -68772,12 +68807,17 @@ nonisolated extension SaveUploadPartInput: SwiftProtobuf.Message, SwiftProtobuf.
       case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
       case 2: try { try decoder.decodeSingularUInt32Field(value: &self.partIndex) }()
       case 3: try { try decoder.decodeSingularBytesField(value: &self.data) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self._offset) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.uploadID.isEmpty {
       try visitor.visitSingularBytesField(value: self.uploadID, fieldNumber: 1)
     }
@@ -68787,6 +68827,9 @@ nonisolated extension SaveUploadPartInput: SwiftProtobuf.Message, SwiftProtobuf.
     if !self.data.isEmpty {
       try visitor.visitSingularBytesField(value: self.data, fieldNumber: 3)
     }
+    try { if let v = self._offset {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -68794,6 +68837,7 @@ nonisolated extension SaveUploadPartInput: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.uploadID != rhs.uploadID {return false}
     if lhs.partIndex != rhs.partIndex {return false}
     if lhs.data != rhs.data {return false}
+    if lhs._offset != rhs._offset {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

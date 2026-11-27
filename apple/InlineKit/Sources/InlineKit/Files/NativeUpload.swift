@@ -651,6 +651,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private let processingTimeout: Duration
   private var activePartTransfers = 0
   private(set) var partWindow = DurableUploadCoordinator.initialPartWindow
+  private(set) var throughput = NativeUploadThroughput()
   private var retryingPendingCancellations = false
   private struct PartTransferWaiter {
     let id: UUID
@@ -737,12 +738,16 @@ public actor DurableUploadCoordinator: MediaUploading {
         create.thumbnailFileUniqueID = thumbnailFileUniqueID
       }
       create.metadata = request.metadata
-      // A file that fits in one part rides along with create, which stores and finishes it in the
-      // same call: one round trip instead of create, part and finish. Older servers ignore it and
-      // the part uploads as usual. It takes a part slot like any part, waiting its turn when the
-      // window is full (an album): the part would wait for that slot anyway, and going inline
-      // after the wait still saves the part and finish round trips.
-      let holdsInlineSlot = byteCount <= Int64(Self.partSize)
+      // A file that fits in one part and uploads quickly rides along with create, which stores and
+      // finishes it in the same call: one round trip instead of create, part and finish. Older
+      // servers ignore it and the part uploads as usual. A slower one goes in pieces instead, so
+      // progress starts after the first 16 KiB rather than at the end. It takes a part slot like
+      // any part, waiting its turn when the window is full (an album).
+      let holdsInlineSlot = NativeUploadPieces.sendsInline(
+        byteCount: byteCount,
+        partSize: Int64(Self.partSize),
+        bytesPerSecond: throughput.bytesPerSecond
+      )
       if holdsInlineSlot {
         try await acquirePartTransferSlot()
         do {
@@ -835,8 +840,13 @@ public actor DurableUploadCoordinator: MediaUploading {
         partSize: partSize,
         total: byteCount
       )
+      let meter = NativeUploadProgressMeter(total: byteCount, report: progress)
+      let pieceGranularity = created.hasPieceGranularity ? Int(created.pieceGranularity) : nil
       try validateAccount(accountToken)
-      progress(durableAcceptedBytes, byteCount)
+      meter.accepted(durableAcceptedBytes)
+      let transferClock = ContinuousClock()
+      var transferStartedAt: ContinuousClock.Instant?
+      var transferredBytes: Int64 = 0
 
       var finishReconciliationAttempts = 0
       var missingPartRounds = 0
@@ -848,12 +858,15 @@ public actor DurableUploadCoordinator: MediaUploading {
           let missingParts = (0 ..< created.partCount).filter { !accepted.contains($0) }
           if !missingParts.isEmpty {
             processingDeadline = nil
+            if transferStartedAt == nil { transferStartedAt = transferClock.now }
             try await withThrowingTaskGroup(of: UInt32.self) { group in
               var nextPart = 0
               // Tasks only wait for a slot; the shared window decides how many parts move, and
               // waiters are served in arrival order, so uploads take turns.
               for _ in 0 ..< min(Self.partWindowLimits.upperBound, missingParts.count) {
                 let partIndex = missingParts[nextPart]
+                // The first part sent ramps up from 16 KiB pieces for an early first progress.
+                let rampUp = nextPart == 0 && accepted.isEmpty
                 nextPart += 1
                 group.addTask { [self] in
                   try await transferPart(
@@ -862,6 +875,9 @@ public actor DurableUploadCoordinator: MediaUploading {
                     stagedURL: stagedURL,
                     partSize: partSize,
                     byteCount: byteCount,
+                    pieceGranularity: pieceGranularity,
+                    rampUp: rampUp,
+                    meter: meter,
                     accountToken: accountToken
                   )
                 }
@@ -875,8 +891,9 @@ public actor DurableUploadCoordinator: MediaUploading {
                   partSize: partSize,
                   total: byteCount
                 )
+                transferredBytes += min(partSize, byteCount - Int64(partIndex) * partSize)
                 try validateAccount(accountToken)
-                progress(durableAcceptedBytes, byteCount)
+                meter.accepted(durableAcceptedBytes, parts: [partIndex])
 
                 if nextPart < missingParts.count {
                   let nextPartIndex = missingParts[nextPart]
@@ -888,11 +905,21 @@ public actor DurableUploadCoordinator: MediaUploading {
                       stagedURL: stagedURL,
                       partSize: partSize,
                       byteCount: byteCount,
+                      pieceGranularity: pieceGranularity,
+                      rampUp: false,
+                      meter: meter,
                       accountToken: accountToken
                     )
                   }
                 }
               }
+            }
+            if let transferStartedAt {
+              let elapsed = transferClock.now - transferStartedAt
+              throughput.record(
+                bytes: transferredBytes,
+                seconds: Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+              )
             }
             finishReconciliationAttempts = 0
           }
@@ -934,7 +961,7 @@ public actor DurableUploadCoordinator: MediaUploading {
             case let .complete(complete):
               if durableAcceptedBytes < byteCount {
                 try validateAccount(accountToken)
-                progress(byteCount, byteCount)
+                meter.complete()
               }
               try validateAccount(accountToken)
               await staging.discard(logicalID: ownerScopedLogicalID)
@@ -953,7 +980,7 @@ public actor DurableUploadCoordinator: MediaUploading {
               if reconciledBytes > durableAcceptedBytes {
                 durableAcceptedBytes = reconciledBytes
                 try validateAccount(accountToken)
-                progress(durableAcceptedBytes, byteCount)
+                meter.accepted(durableAcceptedBytes, parts: accepted)
               }
             case .processing:
               // Replay the idempotent finish operation so it can reclaim a stale server lease.
@@ -978,7 +1005,7 @@ public actor DurableUploadCoordinator: MediaUploading {
           case let .complete(complete):
             if durableAcceptedBytes < byteCount {
               try validateAccount(accountToken)
-              progress(byteCount, byteCount)
+              meter.complete()
             }
             try validateAccount(accountToken)
             await staging.discard(logicalID: ownerScopedLogicalID)
@@ -1165,6 +1192,9 @@ public actor DurableUploadCoordinator: MediaUploading {
     stagedURL: URL,
     partSize: Int64,
     byteCount: Int64,
+    pieceGranularity: Int? = nil,
+    rampUp: Bool = false,
+    meter: NativeUploadProgressMeter? = nil,
     accountToken: AuthAccountMutationToken?
   ) async throws -> UInt32 {
     try Task.checkCancellation()
@@ -1200,18 +1230,29 @@ public actor DurableUploadCoordinator: MediaUploading {
     log.debug(
       "Part dispatch started part=\(partIndex) bytes=\(length) active=\(activePartTransfers) read_ms=\(readMilliseconds) slot_wait_ms=\(slotWaitMilliseconds)"
     )
+    let pieces = pieceGranularity.flatMap {
+      NativeUploadPieces.ranges(partLength: length, granularity: $0, rampUp: rampUp)
+    }
     var accepted = false
     for attempt in 0 ..< Self.maximumPartAttempts {
       try Task.checkCancellation()
       do {
-        let result = try await callUploadRPC(
-          method: .saveUploadPart,
-          input: .saveUploadPart(save),
-          timeout: Self.mutationTimeout,
-          accountToken: accountToken
-        )
-        guard case .saveUploadPart? = result else {
-          throw NativeMediaUploadError.unexpectedResponse
+        // A retry sends the part whole: a server mid-deploy may not take pieces.
+        if let pieces, pieces.count > 1, attempt == 0 {
+          try await savePieces(
+            pieces, of: data, partIndex: partIndex, uploadID: uploadID, meter: meter,
+            accountToken: accountToken
+          )
+        } else {
+          let result = try await callUploadRPC(
+            method: .saveUploadPart,
+            input: .saveUploadPart(save),
+            timeout: Self.mutationTimeout,
+            accountToken: accountToken
+          )
+          guard case .saveUploadPart? = result else {
+            throw NativeMediaUploadError.unexpectedResponse
+          }
         }
         accepted = true
         break
@@ -1219,6 +1260,7 @@ public actor DurableUploadCoordinator: MediaUploading {
         throw CancellationError()
       } catch {
         let saveError = error
+        meter?.partReset(partIndex)
         try Task.checkCancellation()
         attemptFailed = true
         let state: GetUploadStateResult
@@ -1267,6 +1309,43 @@ public actor DurableUploadCoordinator: MediaUploading {
       "Part accepted part=\(partIndex) bytes=\(length) rpc_ms=\(rpcMilliseconds) total_ms=\(totalMilliseconds)"
     )
     return partIndex
+  }
+
+  /// Sends one part as pieces, all at once; the transport writes them in order and the server
+  /// replies to each as it arrives. Throws on the first failed piece.
+  private func savePieces(
+    _ pieces: [Range<Int>],
+    of data: Data,
+    partIndex: UInt32,
+    uploadID: Data,
+    meter: NativeUploadProgressMeter?,
+    accountToken: AuthAccountMutationToken?
+  ) async throws {
+    try await withThrowingTaskGroup(of: Int.self) { group in
+      for piece in pieces {
+        var save = SaveUploadPartInput()
+        save.uploadID = uploadID
+        save.partIndex = partIndex
+        save.offset = UInt32(piece.lowerBound)
+        save.data = data.subdata(in: (data.startIndex + piece.lowerBound) ..< (data.startIndex + piece.upperBound))
+        let request = save
+        group.addTask { [self] in
+          let result = try await callUploadRPC(
+            method: .saveUploadPart,
+            input: .saveUploadPart(request),
+            timeout: Self.mutationTimeout,
+            accountToken: accountToken
+          )
+          guard case .saveUploadPart? = result else {
+            throw NativeMediaUploadError.unexpectedResponse
+          }
+          return piece.count
+        }
+      }
+      while let bytes = try await group.next() {
+        meter?.pieceAcknowledged(part: partIndex, bytes: Int64(bytes))
+      }
+    }
   }
 
   private func callUploadRPC(
