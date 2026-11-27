@@ -21,6 +21,7 @@ import { countTransferWork } from "@in/server/modules/transfers/trace"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 import { sql } from "drizzle-orm"
 import { UploadPartStorageUnavailableError, type UploadPartStore } from "./partStore"
+import { UPLOAD_PIECE_GRANULARITY, UploadPartIntake, UploadPieceAssembler } from "./intake"
 
 setDefaultTimeout(60_000)
 
@@ -891,5 +892,178 @@ describe("native upload operations", () => {
     }
     // Finish stores it with one PUT; an early group pass would open a multipart session instead.
     expect(wakes).toEqual([])
+  })
+
+  const fastOperations = (store: MemoryPartStore, options: { intake?: UploadPartIntake } = {}) =>
+    new NativeUploadOperations(new InlineUploadRepository(), store, finalizer, () => {}, async () => {}, () => {}, {
+      intake: options.intake ?? new UploadPartIntake({
+        isStorageOutage: (error) => (error as { codeNumber?: number }).codeNumber === 503,
+      }),
+      pieces: new UploadPieceAssembler(),
+    })
+
+  const createDocument = async (
+    operations: NativeUploadOperations,
+    requestContext: HandlerContext,
+    body: Uint8Array,
+    seed: number,
+  ) => await operations.create({
+    clientUploadId: new Uint8Array(16).fill(seed), fileName: "fast.bin",
+    mimeType: "application/octet-stream", byteCount: BigInt(body.length),
+    sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+    metadata: { oneofKind: undefined },
+  }, requestContext)
+
+  test("fast acknowledgement replies before the staging write and finish waits for it", async () => {
+    const user = await testUtils.createUser("native-upload-fast-ack@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    let release!: () => void
+    const writing = new Promise<void>((resolve) => { release = resolve })
+    store.afterPut = () => writing
+    const operations = fastOperations(store)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE + 10).fill(9)
+    const created = await createDocument(operations, requestContext, body, 120)
+    expect(created.pieceGranularity).toBe(UPLOAD_PIECE_GRANULARITY)
+
+    const first = await Promise.race([
+      operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body.subarray(0, INLINE_TRANSFER_PART_SIZE) }, requestContext),
+      Bun.sleep(2_000).then(() => "blocked" as const),
+    ])
+    expect(first).toEqual({ alreadyPresent: false })
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 1, data: body.subarray(INLINE_TRANSFER_PART_SIZE) }, requestContext))
+      .toEqual({ alreadyPresent: false })
+    // Held parts count as accepted for resume; the manifest has none yet.
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0, 1])
+
+    const finish = operations.finish({ uploadId: created.uploadId }, requestContext)
+    const early = await Promise.race([finish.then(() => "finished" as const), Bun.sleep(50).then(() => "waiting" as const)])
+    expect(early).toBe("waiting")
+    release()
+    expect(await finish).toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
+    expect(store.objects.size).toBe(2)
+  })
+
+  test("a part sent in pieces is accepted once its last byte arrives", async () => {
+    const user = await testUtils.createUser("native-upload-pieces@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = fastOperations(store)
+    const requestContext = context(user.id, account.session.id)
+    const body = Uint8Array.from({ length: INLINE_TRANSFER_PART_SIZE + 3 * UPLOAD_PIECE_GRANULARITY + 5 }, (_, index) => index % 251)
+    const created = await createDocument(operations, requestContext, body, 121)
+    const G = UPLOAD_PIECE_GRANULARITY
+    const piece = (partIndex: number, offset: number, length: number) => operations.savePart({
+      uploadId: created.uploadId,
+      partIndex,
+      offset,
+      data: body.subarray(partIndex * INLINE_TRANSFER_PART_SIZE + offset, partIndex * INLINE_TRANSFER_PART_SIZE + offset + length),
+    }, requestContext)
+
+    // Part 0: 16 KiB, 16 KiB, 32 KiB, then the rest, out of order and with a resend.
+    expect(await piece(0, G, G)).toEqual({ alreadyPresent: false })
+    expect(await piece(0, 0, G)).toEqual({ alreadyPresent: false })
+    expect(await piece(0, 4 * G, INLINE_TRANSFER_PART_SIZE - 4 * G)).toEqual({ alreadyPresent: false })
+    expect(await piece(0, G, G)).toEqual({ alreadyPresent: false })
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([])
+    expect(await piece(0, 2 * G, 2 * G)).toEqual({ alreadyPresent: false })
+    // Part 1 (the short tail) in two pieces; the last piece may be any length.
+    expect(await piece(1, 0, 2 * G)).toEqual({ alreadyPresent: false })
+    expect(await piece(1, 2 * G, G + 5)).toEqual({ alreadyPresent: false })
+
+    expect(await operations.finish({ uploadId: created.uploadId }, requestContext))
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
+    const stored = [...store.objects.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, bytes]) => bytes)
+    expect(Buffer.concat(stored)).toEqual(Buffer.from(body))
+  })
+
+  test("rejects misaligned or oversized pieces, and pieces where the server takes whole parts", async () => {
+    const user = await testUtils.createUser("native-upload-bad-pieces@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(3 * UPLOAD_PIECE_GRANULARITY).fill(1)
+    const operations = fastOperations(new MemoryPartStore())
+    const created = await createDocument(operations, requestContext, body, 122)
+    const G = UPLOAD_PIECE_GRANULARITY
+    for (const [offset, length] of [[1, G], [0, G - 1], [2 * G, 2 * G], [3 * G, 1]] as const) {
+      await expect(operations.savePart({
+        uploadId: created.uploadId, partIndex: 0, offset, data: new Uint8Array(length),
+      }, requestContext)).rejects.toMatchObject({ codeNumber: 400 })
+    }
+    const wholeParts = new NativeUploadOperations(new InlineUploadRepository(), new MemoryPartStore(), finalizer)
+    const plain = await createDocument(wholeParts, requestContext, body, 123)
+    expect(plain.pieceGranularity).toBeUndefined()
+    await expect(wholeParts.savePart({
+      uploadId: plain.uploadId, partIndex: 0, offset: 0, data: body.subarray(0, G),
+    }, requestContext)).rejects.toMatchObject({ codeNumber: 400 })
+  })
+
+  test("a write that fails behind its acknowledgement is missing at finish and accepted when resent", async () => {
+    const user = await testUtils.createUser("native-upload-fast-ack-lost@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    class FlakyStore extends MemoryPartStore {
+      failures = 1
+      override async put(input: Parameters<MemoryPartStore["put"]>[0]): Promise<string> {
+        if (this.failures > 0) {
+          this.failures -= 1
+          throw new Error("storage write failed")
+        }
+        return await super.put(input)
+      }
+    }
+    const store = new FlakyStore()
+    const operations = fastOperations(store)
+    const requestContext = context(user.id, account.session.id)
+    const body = new TextEncoder().encode("lost behind the reply")
+    const created = await createDocument(operations, requestContext, body, 124)
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .toEqual({ alreadyPresent: false })
+    expect(await operations.finish({ uploadId: created.uploadId }, requestContext))
+      .toEqual({ state: { oneofKind: "missing", missing: { partIndices: [0] } } })
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .toEqual({ alreadyPresent: false })
+    expect(await operations.finish({ uploadId: created.uploadId }, requestContext))
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
+  })
+
+  test("a storage outage behind an acknowledgement turns the next parts into retryable 503s", async () => {
+    const user = await testUtils.createUser("native-upload-fast-ack-outage@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    class UnavailableStore extends MemoryPartStore {
+      override async put(): Promise<string> {
+        throw new UploadPartStorageUnavailableError()
+      }
+    }
+    const intake = new UploadPartIntake({
+      isStorageOutage: (error) => (error as { codeNumber?: number }).codeNumber === 503,
+    })
+    const operations = fastOperations(new UnavailableStore(), { intake })
+    const requestContext = context(user.id, account.session.id)
+    const part = new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(2)
+    const created = await createDocument(operations, requestContext, new Uint8Array([...part, ...part]), 125)
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: part }, requestContext))
+      .toEqual({ alreadyPresent: false })
+    await intake.drain(1_000)
+    await expect(operations.savePart({ uploadId: created.uploadId, partIndex: 1, data: part }, requestContext))
+      .rejects.toMatchObject({ codeNumber: 503, retryAfterSeconds: 5 })
+  })
+
+  test("inline data still finishes in create with fast acknowledgement", async () => {
+    const user = await testUtils.createUser("native-upload-fast-ack-inline@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = fastOperations(store)
+    const requestContext = context(user.id, account.session.id)
+    const body = new TextEncoder().encode("one call")
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(126), fileName: "inline.bin",
+      mimeType: "application/octet-stream", byteCount: BigInt(body.length),
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined }, inlineData: body,
+    }, requestContext)
+    // No finishInline here, so the upload is queued for the worker with part 0 stored.
+    expect(created.acceptedParts).toEqual([0])
+    expect(store.objects.size).toBe(1)
   })
 })

@@ -29,6 +29,11 @@ describe("transfer traces", () => {
     let now = 0
     const traces = new TransferTraces((line) => { lines.push(line) }, () => now)
     const trace = traces.touch("upload:7", "upload", "v3")
+    traces.arrived(trace)
+    now = 30
+    traces.arrived(trace)
+    now = 35
+    traces.arrived(trace)
     let releaseFirst!: () => void
     const first = traces.part("upload:7", trace, 100, async () => {
       recordSqlStatement()
@@ -44,7 +49,8 @@ describe("transfer traces", () => {
     traces.finish("upload:7", "complete")
     traces.finish("upload:7", "complete")
     expect(lines).toEqual([{
-      direction: "upload", carrier: "v3", bytes: 150, parts: 2, durationMs: 42, peakInFlightBytes: 150,
+      direction: "upload", carrier: "v3", bytes: 150, parts: 2, pieces: 0, maxGapMs: 30, durationMs: 42,
+      peakInFlightBytes: 150,
       sqlStatements: 1, storageOps: { put: 0, get: 1, delete: 0 }, putMs: 0, retries: 0, outcome: "complete",
     }])
     expect(JSON.stringify(lines)).not.toContain("upload:7")

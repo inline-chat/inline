@@ -74,9 +74,14 @@ type TransferTrace = {
   readonly counters: TransferCounters
   bytes: number
   parts: number
+  /** Upload requests that carried part of a part (SaveUploadPartInput.offset). */
+  pieces: number
   retries: number
   inFlightBytes: number
   peakInFlightBytes: number
+  lastArrivalAt: number | undefined
+  /** Longest wait between two requests of this transfer: client or network stalls. */
+  maxArrivalGapMs: number
 }
 
 const MAX_OPEN_TRACES = 4_096
@@ -111,9 +116,12 @@ export class TransferTraces {
       counters: emptyTransferCounters(),
       bytes: 0,
       parts: 0,
+      pieces: 0,
       retries: 0,
       inFlightBytes: 0,
       peakInFlightBytes: 0,
+      lastArrivalAt: undefined,
+      maxArrivalGapMs: 0,
     }
     this.#open.set(key, trace)
     while (this.#open.size > MAX_OPEN_TRACES) {
@@ -126,6 +134,15 @@ export class TransferTraces {
 
   get(key: string): TransferTrace | undefined {
     return this.#open.get(key)
+  }
+
+  /** Notes that a request of this transfer arrived, for the longest gap between requests. */
+  arrived(trace: TransferTrace): void {
+    const now = this.now()
+    if (trace.lastArrivalAt !== undefined) {
+      trace.maxArrivalGapMs = Math.max(trace.maxArrivalGapMs, now - trace.lastArrivalAt)
+    }
+    trace.lastArrivalAt = now
   }
 
   /** Counts a part's bytes in flight for the duration of `operation` and attributes its work. */
@@ -150,6 +167,8 @@ export class TransferTraces {
         carrier: trace.carrier,
         bytes: trace.bytes,
         parts: trace.parts,
+        pieces: trace.pieces,
+        maxGapMs: Math.round(trace.maxArrivalGapMs),
         durationMs: Math.round(this.now() - trace.startedAt),
         peakInFlightBytes: trace.peakInFlightBytes,
         sqlStatements: trace.counters.sqlStatements,

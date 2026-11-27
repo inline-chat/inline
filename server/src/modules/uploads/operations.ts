@@ -47,9 +47,16 @@ import { uploadTraceLogLevel } from "./trace"
 import {
   UploadGeometryCache,
   expectedPartLength,
+  isPartAccepted,
   markPartAccepted,
   type UploadGeometry,
 } from "./geometryCache"
+import {
+  UPLOAD_PIECE_GRANULARITY,
+  UploadPartIntake,
+  UploadPieceAssembler,
+  isValidPiece,
+} from "./intake"
 import { countTransferWork, transferTraces, withTransferCounters } from "@in/server/modules/transfers/trace"
 
 const log = new Log("modules/uploads", uploadTraceLogLevel())
@@ -62,6 +69,10 @@ const MAX_WAVEFORM_BYTES = 2_048
 const CLEANUP_PART_CONCURRENCY = 16
 const MAX_ACTIVE_UPLOADS_PER_SESSION = 20
 const MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION = 2n * 1_024n * 1_024n * 1_024n
+/** Finish waits this long for this process's writes of the upload before reading the manifest. */
+const FINISH_SETTLE_MS = 30_000
+/** Shutdown waits this long for writes behind acknowledged parts (Fly allows 45 s). */
+const SHUTDOWN_DRAIN_MS = 25_000
 
 const kindFor = (kind: UploadKind): InlineUploadKind | undefined => {
   switch (kind) {
@@ -154,6 +165,11 @@ const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
 
 const failure = (code: UploadFailure_Code, retryable: boolean): UploadFailure => ({ code, retryable })
 
+/** The 503 `#acceptPart` turns a part storage outage into. */
+const isPartStorageOutage = (error: unknown): boolean =>
+  error instanceof UploadPartStorageUnavailableError ||
+  (error instanceof RealtimeRpcError && error.codeNumber === 503)
+
 const failureForRow = (upload: InlineUploadRecord): UploadFailure => {
   switch (upload.failureCode) {
     case "integrity": return failure(UploadFailure_Code.UPLOAD_FAILURE_INTEGRITY, false)
@@ -185,6 +201,13 @@ export type NativeUploadOperationsOptions = {
   ) => Promise<"complete" | "running" | "processing">
   /** Writes a whole file sent with CREATE_UPLOAD to its final key; see NativeUploadWorker.storeEarly. */
   storeEarly?: (upload: InlineUploadRecord, bytes: Uint8Array, signal: AbortSignal) => Promise<boolean>
+  /**
+   * Acknowledges parts once held and stores them behind the reply; see UploadPartIntake. Without
+   * it every part is stored before its reply.
+   */
+  intake?: UploadPartIntake
+  /** Accepts parts sent in pieces (SaveUploadPartInput.offset); needs `intake`. */
+  pieces?: UploadPieceAssembler
 }
 
 export class NativeUploadOperations {
@@ -192,6 +215,8 @@ export class NativeUploadOperations {
   readonly #groupBuffer: UploadGroupBuffer | undefined
   readonly #finishInline: NativeUploadOperationsOptions["finishInline"]
   readonly #storeEarly: NativeUploadOperationsOptions["storeEarly"]
+  readonly #intake: UploadPartIntake | undefined
+  readonly #pieces: UploadPieceAssembler | undefined
 
   constructor(
     private readonly repository: InlineUploadRepository,
@@ -206,6 +231,13 @@ export class NativeUploadOperations {
     this.#groupBuffer = options.groupBuffer
     this.#finishInline = options.finishInline
     this.#storeEarly = options.storeEarly
+    this.#intake = options.intake
+    this.#pieces = options.intake ? options.pieces : undefined
+  }
+
+  /** Waits, bounded, for parts acknowledged before their write; call at shutdown. */
+  async drain(): Promise<void> {
+    await this.#intake?.drain(SHUTDOWN_DRAIN_MS)
   }
 
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
@@ -245,7 +277,8 @@ export class NativeUploadOperations {
       partSize: result.upload.partSize,
       partCount: result.upload.partCount,
       expiresAt: BigInt(Math.floor(result.upload.expiresAt.getTime() / 1_000)),
-      acceptedParts: result.upload.acceptedParts,
+      acceptedParts: this.#withHeldParts(result.upload.id, result.upload.acceptedParts),
+      pieceGranularity: this.#pieces && result.upload.status === "uploading" ? UPLOAD_PIECE_GRANULARITY : undefined,
     }
     return input.inlineData === undefined
       ? created
@@ -311,6 +344,7 @@ export class NativeUploadOperations {
   async savePart(input: SaveUploadPartInput, context: HandlerContext): Promise<SaveUploadPartResult> {
     throwIfAborted(context.signal)
     if (input.uploadId.length !== 16 || !Number.isInteger(input.partIndex) || input.partIndex < 0) return badRequest()
+    if (input.offset !== undefined && !this.#pieces) return badRequest()
     const startedAt = Date.now()
     const owner = contextOwner(context)
     const resolved = await this.#partGeometry(input.uploadId, owner)
@@ -322,32 +356,78 @@ export class NativeUploadOperations {
     const geometry = resolved
     throwIfAborted(context.signal)
     const geometryDoneAt = Date.now()
-    if (input.partIndex >= geometry.partCount ||
-        input.data.length !== expectedPartLength(geometry, input.partIndex)) return badRequest()
+    if (input.partIndex >= geometry.partCount) return badRequest()
+    const partLength = expectedPartLength(geometry, input.partIndex)
     const traceKey = uploadTraceKey(geometry.uploadDbId)
     const trace = transferTraces.touch(traceKey, "upload", context.inlineProtocol ? "v3" : "v2")
-    const { value: result, counters } = await countTransferWork(() => transferTraces.part(
-      traceKey, trace, input.data.length,
-      () => this.#acceptPart(input, owner, geometry, context.signal),
-    ))
+    transferTraces.arrived(trace)
+    const intake = this.#intake
+    let data = input.data
+    if (input.offset !== undefined) {
+      if (!isValidPiece(partLength, input.offset, input.data.length)) return badRequest()
+      trace.pieces += 1
+    } else if (input.data.length !== partLength) return badRequest()
+    if (intake && (isPartAccepted(geometry, input.partIndex) || intake.isPending(geometry.uploadDbId, input.partIndex))) {
+      // Stored, or held here for storage: a resend (its reply was lost) needs no second write.
+      trace.retries += 1
+      return { alreadyPresent: isPartAccepted(geometry, input.partIndex) }
+    }
+    if (input.offset !== undefined && data.length !== partLength) {
+      const whole = this.#pieces!.add(geometry.uploadDbId, input.partIndex, partLength, input.offset, data)
+      if (!whole) return { alreadyPresent: false }
+      data = whole
+    }
+    const part: SaveUploadPartInput = { uploadId: input.uploadId, partIndex: input.partIndex, data }
+    const store = async (signal: AbortSignal | undefined) => {
+      const { value: result, counters } = await countTransferWork(() => transferTraces.part(
+        traceKey, trace, data.length,
+        () => this.#acceptPart(part, owner, geometry, signal),
+      ))
+      log.debug("UPLOAD_TRACE phase=save_part_done", {
+        outcome: result.outcome,
+        partIndex: input.partIndex,
+        byteCount: data.length,
+        geometryMs: geometryDoneAt - startedAt,
+        hashMs: result.hashDoneAt - geometryDoneAt,
+        objectStoreMs: result.objectStoreDoneAt - result.hashDoneAt,
+        acceptMs: result.acceptDoneAt - result.objectStoreDoneAt,
+        elapsedMs: Date.now() - startedAt,
+        sqlStatements: counters.sqlStatements,
+        storageOps: counters.storagePut + counters.storageGet + counters.storageDelete,
+      })
+      return result
+    }
+    if (intake) {
+      // The write outlives this request: a closed connection must not cancel stored bytes.
+      const accepted = await intake.accept(geometry.uploadDbId, input.partIndex, data.length, () => store(undefined))
+      if (accepted.queued) {
+        trace.parts += 1
+        trace.bytes += data.length
+        return { alreadyPresent: false }
+      }
+      return this.#countStored(trace, data.length, accepted.value)
+    }
+    return this.#countStored(trace, data.length, await store(context.signal))
+  }
+
+  #countStored(
+    trace: ReturnType<typeof transferTraces.touch>,
+    byteCount: number,
+    result: { alreadyPresent: boolean },
+  ): SaveUploadPartResult {
     if (result.alreadyPresent) trace.retries += 1
     else {
       trace.parts += 1
-      trace.bytes += input.data.length
+      trace.bytes += byteCount
     }
-    log.debug("UPLOAD_TRACE phase=save_part_done", {
-      outcome: result.outcome,
-      partIndex: input.partIndex,
-      byteCount: input.data.length,
-      geometryMs: geometryDoneAt - startedAt,
-      hashMs: result.hashDoneAt - geometryDoneAt,
-      objectStoreMs: result.objectStoreDoneAt - result.hashDoneAt,
-      acceptMs: result.acceptDoneAt - result.objectStoreDoneAt,
-      elapsedMs: Date.now() - startedAt,
-      sqlStatements: counters.sqlStatements,
-      storageOps: counters.storagePut + counters.storageGet + counters.storageDelete,
-    })
     return { alreadyPresent: result.alreadyPresent }
+  }
+
+  /** Accepted parts plus the ones this process holds for storage behind an acknowledgement. */
+  #withHeldParts(uploadDbId: number, acceptedParts: number[]): number[] {
+    const held = this.#intake?.pendingParts(uploadDbId) ?? []
+    if (held.length === 0) return acceptedParts
+    return [...new Set([...acceptedParts, ...held])].sort((left, right) => left - right)
   }
 
   async #acceptPart(
@@ -495,7 +575,7 @@ export class NativeUploadOperations {
     }
     switch (upload.status) {
       case "uploading":
-        return { status: UploadStatus.UPLOADING, acceptedParts: upload.acceptedParts }
+        return { status: UploadStatus.UPLOADING, acceptedParts: this.#withHeldParts(upload.id, upload.acceptedParts) }
       case "processing":
         return { status: UploadStatus.PROCESSING, acceptedParts: upload.acceptedParts }
       case "canceled":
@@ -533,8 +613,17 @@ export class NativeUploadOperations {
     throwIfAborted(context.signal)
     const owner = resolvedOwner ?? await this.#owner(context)
     throwIfAborted(context.signal)
+    const cached = this.#intake ? this.#geometry.get(input.uploadId, owner) : undefined
+    if (cached && cached !== "owner_mismatch") {
+      // Parts acknowledged before their write must be in the manifest before it is read.
+      await this.#intake!.settle(cached.uploadDbId, FINISH_SETTLE_MS)
+      throwIfAborted(context.signal)
+    }
     const result = await this.repository.requestFinish(input.uploadId, owner)
-    if (result.kind !== "missing") this.#geometry.drop(input.uploadId)
+    if (result.kind !== "missing") {
+      this.#geometry.drop(input.uploadId)
+      if (cached && cached !== "owner_mismatch") this.#pieces?.drop(cached.uploadDbId)
+    }
     switch (result.kind) {
       case "rejected": return badRequest()
       case "missing":
@@ -592,6 +681,7 @@ export class NativeUploadOperations {
     const canceled = requireValue(await this.repository.cancel(input.uploadId, owner))
     this.#geometry.drop(input.uploadId)
     this.#groupBuffer?.drop(canceled.upload.id)
+    this.#pieces?.drop(canceled.upload.id)
     if (canceled.result.canceled) {
       transferTraces.finish(uploadTraceKey(canceled.upload.id), "canceled")
       this.cancelWorker(canceled.upload.id)
@@ -696,6 +786,8 @@ export const acquireNativeUploadWorker = (): NativeUploadWorkerLease => {
       if (released) return
       released = true
       try {
+        // Parts acknowledged before their write are stored before the worker stops.
+        await nativeUploadOperations.drain()
         await nativeUploadWorker.stop()
       } finally {
         if (nativeUploadWorkerOwner === owner) nativeUploadWorkerOwner = undefined
@@ -715,5 +807,7 @@ export const nativeUploadOperations = new NativeUploadOperations(
     groupBuffer: uploadGroupBuffer,
     finishInline: (upload, signal, stored) => nativeUploadWorker.processNow(upload, signal, stored),
     storeEarly: (upload, bytes, signal) => nativeUploadWorker.storeEarly(upload, bytes, signal),
+    intake: new UploadPartIntake({ isStorageOutage: isPartStorageOutage }),
+    pieces: new UploadPieceAssembler(),
   },
 )
