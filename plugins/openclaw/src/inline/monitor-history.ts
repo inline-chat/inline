@@ -19,7 +19,8 @@ export type CachedChatInfo = {
   dialogFollowMode?: DialogFollowMode | null
 }
 
-type SenderProfileLookup = Pick<InlineSenderProfileCache, "get">
+type SenderProfileLookup = Pick<InlineSenderProfileCache, "get"> &
+  Partial<Pick<InlineSenderProfileCache, "ensureUsers">>
 
 type HistoryContext = {
   historyText: string | null
@@ -101,6 +102,26 @@ export async function resolveChatInfo(
   }
   cache.set(chatId, info)
   return info
+}
+
+/** Users a page of history names: its authors, mention entities and `@123` text. */
+export function collectHistoryUserIds(messages: readonly Message[], meId: bigint): string[] {
+  const userIds = new Set<string>()
+  for (const message of messages) {
+    if (message.fromId !== meId) userIds.add(String(message.fromId))
+    for (const entity of message.entities?.entities ?? []) {
+      if (entity.entity.oneofKind === "mention") userIds.add(String(entity.entity.mention.userId))
+    }
+    for (const userId of numericMentionIds(message.message ?? "")) userIds.add(userId)
+  }
+  userIds.delete(String(meId))
+  return [...userIds]
+}
+
+/** `@123` mentions in text, the form `rewriteNumericMentionsToUsernames` rewrites. */
+export function numericMentionIds(text: string): string[] {
+  if (!text.includes("@")) return []
+  return [...text.matchAll(/(?:^|[^\w])@([0-9]+)\b/g)].map((match) => match[1]!)
 }
 
 export function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: SenderProfileLookup): string {
@@ -745,6 +766,39 @@ export async function buildReplyThreadParentHistoryContext(params: {
   })
 }
 
+export type InlineReplyFacts = {
+  repliedToBot: boolean
+  replyToSenderId: string | null
+}
+
+/**
+ * Who a reply answers, from the bot's own-message cache or one GET_MESSAGES.
+ * The mention gate needs only this, so a group message the bot will drop
+ * never pays for a history page.
+ */
+export async function resolveReplyFacts(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  replyToMsgId: bigint | undefined
+  meId: bigint
+  botMessageIdsByChat: Map<string, string[]>
+}): Promise<InlineReplyFacts> {
+  if (params.replyToMsgId == null) return { repliedToBot: false, replyToSenderId: null }
+  const cachedReplyToBot = hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId)
+  const replyTarget = await findChatMessageById({
+    client: params.client,
+    chatId: params.chatId,
+    messageId: params.replyToMsgId,
+    limit: REPLY_TARGET_LOOKUP_LIMIT,
+    meId: params.meId,
+    botMessageIdsByChat: params.botMessageIdsByChat,
+  })
+  if (replyTarget) {
+    return { repliedToBot: replyTarget.fromId === params.meId, replyToSenderId: String(replyTarget.fromId) }
+  }
+  return { repliedToBot: cachedReplyToBot, replyToSenderId: null }
+}
+
 export async function buildHistoryContext(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -754,13 +808,17 @@ export async function buildHistoryContext(params: {
   meId: bigint
   historyLimit: number
   botMessageIdsByChat: Map<string, string[]>
+  /** Already resolved by `resolveReplyFacts`; skips a second lookup. */
+  replyFacts?: InlineReplyFacts
 }): Promise<HistoryContext> {
   const cachedReplyToBot =
     params.replyToMsgId != null &&
     hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId)
-  let repliedToBot = cachedReplyToBot
-  let replyToSenderId: string | null = null
-  let foundReplyTargetInHistory = false
+  let repliedToBot = params.replyFacts?.repliedToBot ?? cachedReplyToBot
+  let replyToSenderId: string | null = params.replyFacts?.replyToSenderId ?? null
+  // Facts that already name the reply's author stand; otherwise the page may.
+  const replyKnown = params.replyFacts?.replyToSenderId != null
+  let foundReplyTargetInHistory = replyKnown
   const lines: string[] = []
   const attachmentLines: string[] = []
   const entityLines: string[] = []
@@ -780,6 +838,9 @@ export async function buildHistoryContext(params: {
           rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
         }
       }
+      // Authors and mentioned users outside the participant snapshot (thread
+      // replies, people who left) get names from one batched GET_USERS.
+      await params.senderProfilesById.ensureUsers?.(collectHistoryUserIds(messages, params.meId))
 
       const sortedMessages = messages
         .filter((item) => item.id !== params.currentMessageId)
@@ -791,7 +852,7 @@ export async function buildHistoryContext(params: {
         })
 
       for (const item of sortedMessages) {
-        if (params.replyToMsgId != null && item.id === params.replyToMsgId) {
+        if (!replyKnown && params.replyToMsgId != null && item.id === params.replyToMsgId) {
           foundReplyTargetInHistory = true
           replyToSenderId = String(item.fromId)
           repliedToBot = item.fromId === params.meId
@@ -813,7 +874,7 @@ export async function buildHistoryContext(params: {
     }
   }
 
-  if (params.replyToMsgId != null && !foundReplyTargetInHistory) {
+  if (params.replyToMsgId != null && !foundReplyTargetInHistory && params.replyFacts == null) {
     const replyTarget = await findChatMessageById({
       client: params.client,
       chatId: params.chatId,

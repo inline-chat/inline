@@ -758,6 +758,14 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         },
       }
     }
+    if (method === 138 && input?.oneofKind === "getUsers") {
+      if (setup.directoryLookupError) throw setup.directoryLookupError
+      const ids = new Set((input.getUsers?.userIds ?? []).map(String))
+      return {
+        oneofKind: "getUsers",
+        getUsers: { users: (setup.directoryUsers ?? []).filter((user: any) => ids.has(String(user.id))) },
+      }
+    }
     if (method === 13 && input?.oneofKind === "getChatParticipants") {
       if (setup.participantLookupError) throw setup.participantLookupError
       const chatId = String(input.getChatParticipants?.chatId ?? "")
@@ -1049,6 +1057,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         GET_CHAT: 25,
         GET_CHAT_PARTICIPANTS: 13,
         GET_CHATS: 17,
+        GET_USERS: 138,
         EDIT_MESSAGE: 8,
         CREATE_SUBTHREAD: 42,
         GET_MESSAGES: 38,
@@ -8186,7 +8195,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("falls back to cached directory users for direct sender names", async () => {
+  it("looks up one profile for a direct sender missing from participants", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -8238,16 +8247,17 @@ describe("inline/monitor", () => {
           parseMarkdown: true,
         }),
       )
-      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(17, {
-        oneofKind: "getChats",
-        getChats: {},
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(138, {
+        oneofKind: "getUsers",
+        getUsers: { userIds: [42n] },
       })
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(17, expect.anything())
     })
 
     await handle.stop()
   })
 
-  it("falls back to cached directory users for group sender names", async () => {
+  it("looks up one profile for a group sender missing from participants", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -8294,11 +8304,72 @@ describe("inline/monitor", () => {
           BodyForAgent: "hello from group",
         }),
       )
-      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(17, {
-        oneofKind: "getChats",
-        getChats: {},
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(138, {
+        oneofKind: "getUsers",
+        getUsers: { userIds: [51n] },
       })
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(17, expect.anything())
     })
+
+    await handle.stop()
+  })
+
+  it("names history authors outside the participant snapshot with one batched lookup", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2003n,
+            date: 1_700_000_003n,
+            fromId: 51n,
+            message: "what did they say?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      participants: {
+        "88": [{ id: 51n, username: "alice", firstName: "Alice" }],
+      },
+      historyByChat: {
+        "88": [
+          { id: 2001n, date: 1_700_000_001n, fromId: 60n, message: "shipped it, cc @61" },
+          { id: 2002n, date: 1_700_000_002n, fromId: 62n, message: "nice" },
+        ],
+      },
+      directoryUsers: [
+        { id: 60n, username: "bob", firstName: "Bob" },
+        { id: 61n, username: "carol", firstName: "Carol" },
+        { id: 62n, username: "dan", firstName: "Dan" },
+      ],
+      dispatchReplyPayload: { text: "ask @61" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const ctx = harness.calls.finalizeInboundContext.mock.calls.at(-1)?.[0]
+      expect(ctx?.InboundHistory?.map((entry: { sender: string }) => entry.sender)).toEqual([
+        expect.stringContaining("Bob"),
+        expect.stringContaining("Dan"),
+      ])
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: 88n, text: "ask @carol" }),
+      )
+    })
+    const userLookups = harness.calls.invokeRaw.mock.calls.filter(([method]: [number]) => method === 138)
+    expect(userLookups).toHaveLength(1)
+    expect(userLookups[0]![1].getUsers.userIds).toEqual([60n, 61n, 62n])
 
     await handle.stop()
   })
@@ -8542,8 +8613,8 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
-        17,
-        expect.objectContaining({ oneofKind: "getChats" }),
+        138,
+        expect.objectContaining({ oneofKind: "getUsers" }),
       )
     })
     await handle.stop()
@@ -13411,6 +13482,8 @@ describe("inline/monitor", () => {
     await waitFor(() => {
       expect(runtime.log).toHaveBeenCalledWith("inline: drop group chat 88 (no mention)")
     })
+    // The gate runs before the history page: a dropped message reads none.
+    expect(harness.calls.invokeRaw.mock.calls.filter(([method]) => method === 5)).toHaveLength(0)
     expect(shouldHandleTextCommands).toHaveBeenCalledWith(
       expect.objectContaining({
         surface: "inline",

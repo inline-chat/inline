@@ -234,6 +234,9 @@ import {
   resolveInlineReplyThreadContextFromRoute,
   buildReplyThreadParentHistoryContext,
   buildHistoryContext,
+  numericMentionIds,
+  collectHistoryUserIds,
+  resolveReplyFacts,
 } from "./monitor-history.js"
 import {
   resolveInlineMediaMaxBytes,
@@ -1148,15 +1151,15 @@ export async function monitorInlineProvider(params: {
       }
       return result.getChatParticipants.users ?? []
     },
-    fetchDirectoryUsers: async () => {
-      const result = await client.invokeRaw(Method.GET_CHATS, {
-        oneofKind: "getChats",
-        getChats: {},
+    fetchUsers: async (userIds) => {
+      const result = await client.invokeRaw(Method.GET_USERS, {
+        oneofKind: "getUsers",
+        getUsers: { userIds: [...userIds] },
       })
-      if (result.oneofKind !== "getChats") {
+      if (result.oneofKind !== "getUsers") {
         throw new Error(`unexpected response: ${result.oneofKind ?? "unknown"}`)
       }
-      return result.getChats.users ?? []
+      return result.getUsers.users ?? []
     },
     onError: (operation, error) => {
       publishStatus({ lastError: `${operation} failed: ${String(error)}` })
@@ -2084,37 +2087,25 @@ export async function monitorInlineProvider(params: {
       historyLimit: account.config.historyLimit,
       dmHistoryLimit: account.config.dmHistoryLimit,
     })
-    const historyContext = await buildHistoryContext({
-      client,
-      chatId,
-      currentMessageId: msg.id,
-      replyToMsgId: msg.replyToMsgId,
-      senderProfilesById,
-      meId,
-      historyLimit,
-      botMessageIdsByChat,
-    }).catch((err) => {
-      publishStatus({ lastError: `getChatHistory failed: ${String(err)}` })
-      return {
-        historyText: null,
-        attachmentText: null,
-        entityText: null,
-        inboundHistory: [],
-        repliedToBot: false,
-        replyToSenderId: null,
-      }
-    })
-    let effectiveHistoryContext =
-      replyThreadContext?.anchorMessage != null
-        ? prependInlineReplyThreadAnchor({
-            historyContext,
-            anchorMessage: replyThreadContext.anchorMessage,
-            parentChatId: replyThreadContext.parentChatId,
-            senderProfilesById,
-            meId,
-          })
-        : historyContext
-    if (senderIsBot && !botAddressedThisBot && !effectiveHistoryContext.repliedToBot) {
+    // The gate below needs only who a reply answers. The history page is read
+    // after it, so group messages this bot drops never pay for one. Human DMs
+    // never consult these facts before the gate; their history page finds the
+    // reply target as before.
+    const gateNeedsReplyFacts = isGroup || senderIsBot
+    const resolvedReplyFacts = gateNeedsReplyFacts
+      ? await resolveReplyFacts({
+          client,
+          chatId,
+          replyToMsgId: msg.replyToMsgId,
+          meId,
+          botMessageIdsByChat,
+        }).catch((err) => {
+          publishStatus({ lastError: `getMessages failed: ${String(err)}` })
+          return { repliedToBot: false, replyToSenderId: null }
+        })
+      : undefined
+    const replyFacts = resolvedReplyFacts ?? { repliedToBot: false, replyToSenderId: null }
+    if (senderIsBot && !botAddressedThisBot && !replyFacts.repliedToBot) {
       runtime.log?.(`inline: observe bot reply to someone else chat=${String(chatId)} sender=${senderId}`)
       return
     }
@@ -2140,7 +2131,7 @@ export async function monitorInlineProvider(params: {
       isGroup &&
       ((account.config.replyToBotWithoutMention ?? true) || unfollowedFreeResponse) &&
       msg.replyToMsgId != null &&
-      effectiveHistoryContext.repliedToBot
+      replyFacts.repliedToBot
     const inferredThreadAttention = followModeImplicitMention || replyToBotImplicitMention
     // A reply is addressed to its author. Replies to other people or bots stay
     // theirs unless they mention this bot; replying to yourself is not one.
@@ -2148,10 +2139,10 @@ export async function monitorInlineProvider(params: {
       isGroup &&
       callbackActionEvent == null &&
       msg.replyToMsgId != null &&
-      !effectiveHistoryContext.repliedToBot &&
-      effectiveHistoryContext.replyToSenderId != null &&
-      effectiveHistoryContext.replyToSenderId !== String(meId) &&
-      effectiveHistoryContext.replyToSenderId !== senderId
+      !replyFacts.repliedToBot &&
+      replyFacts.replyToSenderId != null &&
+      replyFacts.replyToSenderId !== String(meId) &&
+      replyFacts.replyToSenderId !== senderId
     const addressedToOthers = addressedElsewhere || (repliedToSomeoneElse && !wasMentioned)
     // Messages addressed to someone else never start a turn here, whether the
     // room is followed, free-response, or a thread this bot replied in.
@@ -2212,6 +2203,42 @@ export async function monitorInlineProvider(params: {
       })
       return
     }
+
+    const historyContext = await buildHistoryContext({
+      client,
+      chatId,
+      currentMessageId: msg.id,
+      replyToMsgId: msg.replyToMsgId,
+      senderProfilesById,
+      meId,
+      historyLimit,
+      botMessageIdsByChat,
+      ...(resolvedReplyFacts ? { replyFacts: resolvedReplyFacts } : {}),
+    }).catch((err) => {
+      publishStatus({ lastError: `getChatHistory failed: ${String(err)}` })
+      return {
+        historyText: null,
+        attachmentText: null,
+        entityText: null,
+        inboundHistory: [],
+        ...replyFacts,
+      }
+    })
+    if (replyThreadContext?.anchorMessage != null) {
+      await senderProfilesById.ensureUsers(
+        collectHistoryUserIds([replyThreadContext.anchorMessage], meId),
+      )
+    }
+    let effectiveHistoryContext =
+      replyThreadContext?.anchorMessage != null
+        ? prependInlineReplyThreadAnchor({
+            historyContext,
+            anchorMessage: replyThreadContext.anchorMessage,
+            parentChatId: replyThreadContext.parentChatId,
+            senderProfilesById,
+            meId,
+          })
+        : historyContext
 
     const parseMarkdown = account.config.parseMarkdown ?? true
     if (inlineFollowCommand) {
@@ -3985,6 +4012,7 @@ export async function monitorInlineProvider(params: {
                   visiblePayload.text ??
                   ""
                 const mediaList = resolveInlinePayloadMediaUrls(visiblePayload)
+                await senderProfilesById.ensureUsers(numericMentionIds(rawText))
                 const sanitizedOutboundText = sanitizeInlineDeliveryText(
                   rewriteNumericMentionsToUsernames(rawText, senderProfilesById),
                 )
