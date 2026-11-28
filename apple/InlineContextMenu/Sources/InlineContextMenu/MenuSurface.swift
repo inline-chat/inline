@@ -4,24 +4,28 @@ import Symbols
 
 // MARK: - Metrics and appearance
 
-/// Sizes. The defaults follow AppKit's menu (measured on macOS 27: 13 pt text at x 35, symbols at their
-/// natural ~13 pt in a 15 pt column at x 15, 11 pt separators, 12 pt corners), with taller rows.
+/// Sizes. Rows, insets and separators follow Telegram macOS's menu (28 pt rows, a highlight inset 5 pt
+/// from the sides and 1 pt from the rows next to it, 5 pt separators, 5 pt top and bottom padding), which
+/// is tighter than AppKit's 11 pt separators and 6 pt padding.
 public struct ContextMenuMetrics {
   /// AppKit uses 24; 28 gives the pointer and the eye more room (Telegram uses 28 too).
   public var rowHeight: CGFloat = 28
   public var subtitleRowHeight: CGFloat = 40
   public var footnoteRowHeight: CGFloat = 22
-  public var separatorHeight: CGFloat = 11
+  /// Telegram uses 5; AppKit 11.
+  public var separatorHeight: CGFloat = 5
   public var headerHeight: CGFloat = 26
-  public var verticalPadding: CGFloat = 6
+  public var verticalPadding: CGFloat = 5
   /// Inset of the highlight from the menu edge.
   public var highlightInset: CGFloat = 5
+  /// Inset of the highlight from the row's top and bottom, so neighbouring highlights never touch.
+  public var highlightVerticalInset: CGFloat = 1
   /// AppKit uses 7. Concentric with the 15 pt menu corners at the 5 pt inset.
   public var highlightRadius: CGFloat = 10
   /// Padding inside the highlight before the first column and after the last.
   public var contentPadding: CGFloat = 9
   /// The icon column. Symbols draw at their natural size for `iconPointSize`, centered in it.
-  public var iconColumnWidth: CGFloat = 20
+  public var iconColumnWidth: CGFloat = 18
   /// AppKit draws menu symbols at 13 pt, small scale, regular weight (an arrow is 13 × 12 pt). A size
   /// up and a weight up reads better with the taller rows.
   public var iconPointSize: CGFloat = 14
@@ -33,7 +37,7 @@ public struct ContextMenuMetrics {
   /// Width of the key column: keys right-align in it and modifiers end where it starts, so ⌘ lines up
   /// down the menu as in AppKit.
   public var keyColumnWidth: CGFloat = 12
-  public var minWidth: CGFloat = 210
+  public var minWidth: CGFloat = 180
   public var maxWidth: CGFloat = 420
   /// AppKit's menu glass uses 12; ours is rounder.
   public var cornerRadius: CGFloat = 15
@@ -277,10 +281,10 @@ final class ContextMenuChromeView: NSView {
     shadowLayer.cornerRadius = radius
     shadowLayer.cornerCurve = .continuous
     shadowLayer.shadowPath = CGPath(roundedRect: CGRect(origin: .zero, size: body.size), cornerWidth: radius, cornerHeight: radius, transform: nil)
-    // A soft, wide shadow like the menu window's, a little deeper in dark mode where it reads less.
-    shadowLayer.shadowOpacity = dark ? 0.32 : 0.16
-    shadowLayer.shadowRadius = 16
-    shadowLayer.shadowOffset = CGSize(width: 0, height: -6)
+    // A light, close shadow: enough to lift the glass off the chat, not a halo around it.
+    shadowLayer.shadowOpacity = dark ? 0.22 : 0.09
+    shadowLayer.shadowRadius = 8
+    shadowLayer.shadowOffset = CGSize(width: 0, height: -2)
     rim.frame = body
     // Glass draws its own edge; the rim is for the vibrancy fallback and for Increase Contrast.
     if increaseContrast {
@@ -524,7 +528,7 @@ final class ContextMenuContentView: NSView {
     let destructive = rows[index].item.contextMenuStyle == .destructive
     highlightView.color = destructive ? .systemRed : .controlAccentColor
     highlightView.radius = metrics.highlightRadius
-    highlightView.frame = rowFrames[index].insetBy(dx: metrics.highlightInset, dy: 0)
+    highlightView.frame = rowFrames[index].insetBy(dx: metrics.highlightInset, dy: metrics.highlightVerticalInset)
     highlightView.isHidden = false
   }
 
@@ -571,9 +575,10 @@ final class ContextMenuContentView: NSView {
           let view = iconViews[index], rows.indices.contains(index), view.image?.isTemplate == true
     else { return }
     let effect = rows[index].item.contextMenuIconEffect ?? defaultIconEffect
+    guard effect != .none else { return }
     view.removeAllSymbolEffects(animated: false)
     switch effect {
-    case .none: break
+    case .none: return
     case .bounceUp: view.addSymbolEffect(.bounce.up, options: .nonRepeating)
     case .bounceDown: view.addSymbolEffect(.bounce.down, options: .nonRepeating)
     case .wiggleLeft: view.addSymbolEffect(.wiggle.left, options: .nonRepeating)

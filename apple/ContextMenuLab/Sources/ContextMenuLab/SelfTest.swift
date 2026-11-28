@@ -232,7 +232,7 @@ final class SelfTest {
       check("look.disabledIconIsTertiary", disabledTint == .tertiaryLabelColor, "tint=\(disabledTint?.description ?? "nil")")
       let highlightedTint = session.rootIconTint(title: "Mark")
       check("look.highlightedIconIsWhite", highlightedTint == .selectedMenuItemTextColor, "tint=\(highlightedTint?.description ?? "nil")")
-      check("look.keyboardHighlightPlaysIconEffect", session.rootIconEffectsPlayed >= 4, "effects=\(session.rootIconEffectsPlayed)")
+      check("look.noIconEffects", session.rootIconEffectsPlayed == 0, "effects=\(session.rootIconEffectsPlayed)")
       if #available(macOS 26.0, *), let glass = findGlass(in: session.rootPanel?.contentView) {
         let subvariant = glass.responds(to: NSSelectorFromString("_subvariant")) ? glass.value(forKey: "_subvariant") as? String : nil
         check("look.menuGlassVariant", subvariant == "menu", "subvariant=\(subvariant ?? "nil")")

@@ -99,6 +99,8 @@ final class LabController: NSObject, NSMenuDelegate, NSMenuItemValidation {
       options.log = { [weak self] in self?.log("session: \($0)") }
       custom.options = options
       custom.accessoryViewProvider = { [weak self] in self?.makeReactionBar(style: .accessory) }
+      // As the app places its reactions bar (MessageReactionActions.contextMenuAccessoryConfiguration).
+      custom.options.accessoryConfiguration = ContextMenuAccessoryConfiguration(alignment: .trailing, spacing: 10, offset: 30)
       menu = custom
     default:
       menu = NSMenu()
@@ -184,9 +186,9 @@ final class LabController: NSObject, NSMenuDelegate, NSMenuItemValidation {
     }
     let reactionsInAccessory = mode == .custom
 
-    _ = add("Reply", #selector(labAction(_:)), key: "r", symbol: "arrowshape.turn.up.left", effect: .wiggleLeft)
-    _ = add("Reply in Thread", #selector(labAction(_:)), symbol: "bubble.left.and.text.bubble.right", effect: .wiggleLeft)
-    let forward = add("Forward", nil, symbol: "arrowshape.turn.up.right", effect: .wiggleRight)
+    _ = add("Reply", #selector(labAction(_:)), key: "r", symbol: "arrowshape.turn.up.left")
+    _ = add("Reply in Thread", #selector(labAction(_:)), symbol: "bubble.left.and.text.bubble.right")
+    let forward = add("Forward", nil, symbol: "arrowshape.turn.up.right")
     let chats = NSMenu(title: "Forward")
     chats.delegate = self
     chats.addItem(NSMenuItem.sectionHeader(title: "Recent"))
@@ -206,7 +208,7 @@ final class LabController: NSObject, NSMenuDelegate, NSMenuItemValidation {
     }
 
     menu.addItem(.separator())
-    _ = add("Copy Text", #selector(labAction(_:)), key: "c", symbol: "document.on.document", effect: .bounceUp)
+    _ = add("Copy Text", #selector(labAction(_:)), key: "c", symbol: "document.on.document")
     let entities = add("Copy Message + Entities", #selector(labAction(_:)), key: "c")
     entities.keyEquivalentModifierMask = [.command, .option]
     entities.isAlternate = true
@@ -216,17 +218,17 @@ final class LabController: NSObject, NSMenuDelegate, NSMenuItemValidation {
       item.image = NSImage(systemSymbolName: "text.cursor", accessibilityDescription: nil)
       menu.addItem(item)
     }
-    _ = add("Copy Message Link", #selector(labAction(_:)), symbol: "link", effect: .wiggleClockwise)
+    _ = add("Copy Message Link", #selector(labAction(_:)), symbol: "link")
 
     menu.addItem(.separator())
     if message?.outgoing ?? true {
-      _ = add("Edit", #selector(labAction(_:)), key: "e", symbol: "pencil", effect: .wiggleClockwise)
+      _ = add("Edit", #selector(labAction(_:)), key: "e", symbol: "pencil")
     }
-    _ = add("Pin", #selector(labAction(_:)), symbol: "pin", effect: .bounceDown)
-    _ = add("Select", #selector(labAction(_:)), symbol: "checkmark.circle", effect: .bounceUp)
+    _ = add("Pin", #selector(labAction(_:)), symbol: "pin")
+    _ = add("Select", #selector(labAction(_:)), symbol: "checkmark.circle")
 
     menu.addItem(.separator())
-    _ = add("Create Linear Issue", #selector(labAction(_:)), symbol: "circle.badge.plus", effect: .bounceUp)
+    _ = add("Create Linear Issue", #selector(labAction(_:)), symbol: "circle.badge.plus")
     let mark = NSMenuItem(title: "Mark", action: #selector(BubbleView.markFromMenu(_:)), keyEquivalent: "")
     mark.image = NSImage(systemSymbolName: "bookmark", accessibilityDescription: nil)
     menu.addItem(mark) // no target: resolved from the clicked view
@@ -242,7 +244,7 @@ final class LabController: NSObject, NSMenuDelegate, NSMenuItemValidation {
     }
 
     menu.addItem(.separator())
-    let delete = add("Delete", #selector(labAction(_:)), key: "\u{8}", symbol: "trash", effect: .wiggleClockwise)
+    let delete = add("Delete", #selector(labAction(_:)), key: "\u{8}", symbol: "trash")
     delete.contextMenuStyle = .destructive
     if message?.edited == true {
       let edited = NSMenuItem(title: "Edited Nov 26 at 7:30 PM", action: nil, keyEquivalent: "")

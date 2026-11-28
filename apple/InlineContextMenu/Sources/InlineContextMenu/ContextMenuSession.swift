@@ -17,15 +17,24 @@ public struct ContextMenuAccessoryConfiguration {
   public var location: Location = .above
   /// Which edge of the menu the accessory lines up with.
   public var alignment: Alignment = .leading
-  /// Gap between the accessory and the menu.
-  public var spacing: CGFloat = 6
+  /// Gap between the accessory and the menu. Telegram leaves 10.
+  public var spacing: CGFloat = 10
+  /// Moves the accessory along the menu's edge, positive to the right, after the alignment.
+  public var offset: CGFloat = 0
   /// Put the accessory on the menu's glass as a capsule. Off when the accessory draws its own background.
   public var usesMenuMaterial = true
 
-  public init(location: Location = .above, alignment: Alignment = .leading, spacing: CGFloat = 6, usesMenuMaterial: Bool = true) {
+  public init(
+    location: Location = .above,
+    alignment: Alignment = .leading,
+    spacing: CGFloat = 10,
+    offset: CGFloat = 0,
+    usesMenuMaterial: Bool = true
+  ) {
     self.location = location
     self.alignment = alignment
     self.spacing = spacing
+    self.offset = offset
     self.usesMenuMaterial = usesMenuMaterial
   }
 }
@@ -69,8 +78,8 @@ public struct ContextMenuOptions {
   public var metrics = ContextMenuMetrics()
   public var material: ContextMenuMaterial = .automatic
   public var animation: Animation = .pop
-  /// The hover effect for icons whose item sets none.
-  public var defaultIconEffect: ContextMenuIconEffect = .bounceUp
+  /// The hover effect for icons whose item sets none. Off: menus read calmer without it.
+  public var defaultIconEffect: ContextMenuIconEffect = .none
   /// A left click outside closes the menu. Native menus swallow that click; pass it through instead when true.
   public var outsideClickPassesThrough = false
   /// A right click outside closes this menu and opens the next one in the same click.
@@ -300,6 +309,7 @@ public final class ContextMenuSession: NSObject {
     case .center: menuRect.midX - size.width / 2
     case .trailing: menuRect.maxX - size.width
     }
+    x += configuration.offset
     if x + size.width > visible.maxX { x = visible.maxX - size.width }
     x = max(x, visible.minX)
     var y: CGFloat
@@ -431,6 +441,19 @@ public final class ContextMenuSession: NSObject {
   }
 
   // MARK: Closing
+
+  /// Closes the menu and leaves the accessory where it is, for an accessory that grows into its own UI
+  /// in place (the reactions bar opening the full emoji picker from its +). The menu's input handling
+  /// ends here; close the returned handle when that UI is done. Nil when the menu has no accessory.
+  @discardableResult
+  public func closeMenuKeepingAccessory() -> ContextMenuDetachedAccessory? {
+    guard isOpen, let panel = accessoryPanel else { return nil }
+    if accessoryHasKeyboardFocus { _ = setAccessoryFocus(false) }
+    accessoryPanel = nil
+    accessoryChrome = nil
+    close(animated: true, reason: .action)
+    return ContextMenuDetachedAccessory(panel: panel)
+  }
 
   public func close(animated: Bool = true, reason: ContextMenuCloseReason = .programmatic) {
     guard isOpen else { return }
@@ -1047,4 +1070,32 @@ final class ContextMenuTrackingView: NSView {
   override func mouseEntered(with event: NSEvent) { onMove() }
   override func mouseExited(with event: NSEvent) { onMove() }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// An accessory left on screen after its menu closed (`closeMenuKeepingAccessory()`).
+@MainActor
+public final class ContextMenuDetachedAccessory {
+  private var panel: ContextMenuPanel?
+
+  init(panel: ContextMenuPanel) {
+    self.panel = panel
+  }
+
+  public var isOpen: Bool { panel != nil }
+
+  public func close(animated: Bool = true) {
+    guard let panel else { return }
+    self.panel = nil
+    guard animated else {
+      ContextMenuPanelPool.give(panel)
+      return
+    }
+    panel.ignoresMouseEvents = true
+    NSAnimationContext.runAnimationGroup({ context in
+      context.duration = 0.15
+      panel.animator().alphaValue = 0
+    }, completionHandler: {
+      MainActor.assumeIsolated { ContextMenuPanelPool.give(panel) }
+    })
+  }
 }
