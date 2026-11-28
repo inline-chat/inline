@@ -176,6 +176,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     var awaitsArrival = false
     /// The landed message flashes; a return to where a reply jump started lands quietly.
     var highlights = true
+    /// A row to land at the top instead of centring the message: a day's row, for a day pill's tap.
+    var topRow: ChatRowID?
   }
 
   /// A message the reader jumped from to the one its reply quotes. As Telegram keeps them, the scroll
@@ -1135,7 +1137,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         towards = direction(of: target, from: shownMessageId)
         if pendingFocus != nil, case .message = target {
           landed = resolveFocus(in: snapshot)
-          scroll = landed.map { .to($0.row, .center) } ?? .latest
+          scroll = landed.map { focusScroll($0.row, in: snapshot) } ?? .latest
           timing = pendingFocus?.animated == false ? .none : Self.jumpTiming
           if landed == nil {
             pendingFocus = nil
@@ -1580,7 +1582,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     focus(messageID, requiresExactMessage: requiresExactMessage, highlights: true)
   }
 
-  private func focus(_ messageID: Int64, requiresExactMessage: Bool, highlights: Bool) {
+  /// Where a focus lands: its top row at the top when the window has it, else the message centred.
+  private func focusScroll(_ row: ChatRowID, in snapshot: ChatRowSnapshot) -> TimelineScroll<ChatRowID> {
+    if let top = pendingFocus?.topRow, snapshot.index(of: top) != nil { return .to(top, .top(0)) }
+    return .to(row, .center)
+  }
+
+  private func focus(_ messageID: Int64, requiresExactMessage: Bool, highlights: Bool, topRow: ChatRowID? = nil) {
     // An explicit focus wins over the unread line still being fetched and a return to latest.
     endUnreadFetch(placesLine: false)
     cancelPendingMessageFocus()
@@ -1594,14 +1602,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       return
     }
     pendingFocus = PendingFocus(
-      messageId: messageID, requiresExact: requiresExactMessage, animated: hasOpened, highlights: highlights
+      messageId: messageID, requiresExact: requiresExactMessage, animated: hasOpened, highlights: highlights,
+      topRow: topRow
     )
     // A row already loaded: there now, or where the chat opens (the first layout places it).
     if viewModel.historyCoverage.isCertifiedMessage(messageID) {
       if hasOpened, let snapshot, let focus = resolveFocus(in: snapshot, exactOnly: true) {
-        let near = list.layout.placement(for: focus.row) != nil
+        let near = list.layout.placement(for: topRow ?? focus.row) != nil || list.layout.placement(for: focus.row) != nil
         list.apply(TimelineTransaction(
-          scroll: .to(focus.row, .center), timing: near ? Self.rowTiming : Self.jumpTiming,
+          scroll: focusScroll(focus.row, in: snapshot), timing: near ? Self.rowTiming : Self.jumpTiming,
           towards: direction(of: .message(messageID), from: messageIdOnScreen())
         ))
         focusResolved(focus, opening: false)
@@ -2150,12 +2159,22 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     jumpToDay(day)
   }
 
+  /// To the day's start (Mo, 2026-11-27: it went only as far up as was loaded): its first message is found first
+  /// (`ChatDayStart`, fetching older history when a hole lies before the first one cached), then the list goes there
+  /// as a jump to a message does (a scroll when loaded, else its window with the far-jump slide), the day's row at the
+  /// top, without a flash (as Telegram).
   private func jumpToDay(_ day: Date) {
     cancelPendingMessageFocus()
-    let id = ChatRowID.daySeparator(day)
-    let near = list.layout.placement(for: id) != nil
-    list.apply(TimelineTransaction(scroll: .to(id, .top(0)), timing: near ? Self.rowTiming : Self.jumpTiming))
     scheduleDatePillHide()
+    let end = Calendar.autoupdatingCurrent.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+    let peer = peer
+    jumpTask = Task { @MainActor [weak self] in
+      let first = try? await ChatDayStart.firstMessageId(peer: peer, dayStart: day, dayEnd: end)
+      guard let self, !Task.isCancelled else { return }
+      jumpTask = nil
+      guard let first else { return }
+      focus(first, requiresExactMessage: false, highlights: false, topRow: .daySeparator(day))
+    }
   }
 
   // MARK: - Status notice
