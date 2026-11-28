@@ -1,4 +1,5 @@
 import InlineKit
+import InlineSharedSnapshot
 import InlineUI
 import Intents
 import SwiftUI

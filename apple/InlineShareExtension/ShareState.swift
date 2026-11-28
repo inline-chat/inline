@@ -5,6 +5,7 @@ import ImageIO
 import InlineIntents
 import InlineKit
 import InlineProtocol
+import InlineSharedSnapshot
 import Logger
 import MultipartFormDataKit
 import RealtimeV2

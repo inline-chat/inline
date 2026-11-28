@@ -1,136 +1,13 @@
 import Foundation
 import InlineConfig
 import InlineIntents
+import InlineSharedSnapshot
 import Logger
 
-struct SharedData: Codable {
+/// What the share extension shows: the snapshot payload and when the app wrote it.
+struct SharedData {
   var shareExtensionData: ShareExtensionData
   var lastUpdate: Date
-
-  init(shareExtensionData: ShareExtensionData, lastUpdate: Date) {
-    self.shareExtensionData = shareExtensionData
-    self.lastUpdate = lastUpdate
-  }
-}
-
-struct ShareExtensionData: Codable {
-  var chats: [SharedChat]
-  var users: [SharedUser]
-
-  init(chats: [SharedChat], users: [SharedUser]) {
-    self.chats = chats
-    self.users = users
-  }
-}
-
-struct SharedChat: Codable {
-  var id: Int64
-  var title: String
-  var peerUserId: Int64?
-  var peerThreadId: Int64?
-  var lastMessageDate: Date?
-  var pinned: Bool?
-  var spaceName: String?
-  var emoji: String?
-  var parentTitle: String?
-  var preview: String?
-  var searchText: String?
-  var unread: Bool?
-  var archived: Bool?
-  var isReplyThread: Bool?
-
-  init(
-    id: Int64,
-    title: String,
-    peerUserId: Int64?,
-    peerThreadId: Int64?,
-    lastMessageDate: Date?,
-    pinned: Bool?,
-    spaceName: String?,
-    emoji: String?,
-    parentTitle: String? = nil,
-    preview: String? = nil,
-    searchText: String? = nil,
-    unread: Bool? = nil,
-    archived: Bool? = nil,
-    isReplyThread: Bool? = nil
-  ) {
-    self.id = id
-    self.title = title
-    self.peerUserId = peerUserId
-    self.peerThreadId = peerThreadId
-    self.lastMessageDate = lastMessageDate
-    self.pinned = pinned
-    self.spaceName = spaceName
-    self.emoji = emoji
-    self.parentTitle = parentTitle
-    self.preview = preview
-    self.searchText = searchText
-    self.unread = unread
-    self.archived = archived
-    self.isReplyThread = isReplyThread
-  }
-}
-
-struct SharedUser: Codable, Equatable {
-  var id: Int64
-  var firstName: String
-  var lastName: String
-  var displayName: String?
-  var email: String?
-  var username: String?
-  var profileCdnUrl: String?
-  var profileFileId: String?
-  var profileLocalPath: String?
-  var profileFileUniqueId: String?
-  var profileSharedLocalPath: String?
-
-  init(
-    id: Int64,
-    firstName: String,
-    lastName: String,
-    displayName: String?,
-    email: String? = nil,
-    username: String? = nil,
-    profileCdnUrl: String? = nil,
-    profileFileId: String? = nil,
-    profileLocalPath: String? = nil,
-    profileFileUniqueId: String? = nil,
-    profileSharedLocalPath: String? = nil
-  ) {
-    self.id = id
-    self.firstName = firstName
-    self.lastName = lastName
-    self.displayName = displayName
-    self.email = email
-    self.username = username
-    self.profileCdnUrl = profileCdnUrl
-    self.profileFileId = profileFileId
-    self.profileLocalPath = profileLocalPath
-    self.profileFileUniqueId = profileFileUniqueId
-    self.profileSharedLocalPath = profileSharedLocalPath
-  }
-}
-
-extension SharedUser {
-  var sharedAvatarURL: URL? {
-    guard let relativePath = profileSharedLocalPath?.trimmedForIntent,
-          !relativePath.hasPrefix("/"),
-          !relativePath.split(separator: "/").contains(".."),
-          let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.chat.inline"
-          )
-    else { return nil }
-
-    let standardizedContainerURL = containerURL.standardizedFileURL
-    let avatarURL = standardizedContainerURL
-      .appendingPathComponent(relativePath)
-      .standardizedFileURL
-    guard avatarURL.path.hasPrefix(standardizedContainerURL.path + "/") else {
-      return nil
-    }
-    return avatarURL
-  }
 }
 
 extension SharedChat {
@@ -252,22 +129,20 @@ private enum SharedDataBridgeError: LocalizedError {
   }
 }
 
+/// The pre-envelope file, read only until the app writes its first snapshot after an update.
+private struct LegacySharedData: Decodable {
+  var shareExtensionData: ShareExtensionData
+  var lastUpdate: Date
+}
+
 // Bridge manager to handle data exchange
 final class BridgeManager: Sendable {
   static let shared = BridgeManager()
 
-  private let sharedContainerIdentifier = "group.chat.inline"
+  private let log = Log.scoped("SharedData")
 
-  var shareDataFileName: String {
-    if let profile = ProjectConfig.userProfile {
-      return "SharedData_\(profile).json"
-    }
-    #if DEBUG
-    return "SharedData_dev.json"
-    #else
-    return "SharedData.json"
-    #endif
-  }
+  /// Snapshots in the app group, stamped with the signed-in account from the notification fence.
+  let store: SharedSnapshotStore? = SharedSnapshotStore.appGroup(userProfile: ProjectConfig.userProfile)
 
   var intentAvatarDirectoryName: String {
     if let profile = ProjectConfig.userProfile {
@@ -280,57 +155,80 @@ final class BridgeManager: Sendable {
     #endif
   }
 
-  private var sharedDataURL: URL? {
-    guard let containerURL = sharedContainerURL else { return nil }
-    return containerURL.appendingPathComponent(shareDataFileName)
+  private var legacyShareDataFileName: String {
+    if let profile = ProjectConfig.userProfile {
+      return "SharedData_\(profile).json"
+    }
+    #if DEBUG
+    return "SharedData_dev.json"
+    #else
+    return "SharedData.json"
+    #endif
   }
 
-  private var sharedContainerURL: URL? {
-    FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: sharedContainerIdentifier
-    )
+  private var legacySharedDataURL: URL? {
+    SharedSnapshotStore.appGroupContainerURL?.appendingPathComponent(legacyShareDataFileName)
   }
 
   // Save data from main app to be shared with extension
-  func saveSharedData(chats: [SharedChat], users: [SharedUser]) throws {
-    guard let sharedDataURL else {
+  @discardableResult
+  func saveSharedData(chats: [SharedChat], users: [SharedUser]) throws -> SharedSnapshotWrite {
+    guard let store else {
       throw SharedDataBridgeError.containerUnavailable
     }
 
-    let shareExtensionData = ShareExtensionData(chats: chats, users: users)
-    let sharedData = SharedData(shareExtensionData: shareExtensionData, lastUpdate: Date())
-    let data = try JSONEncoder().encode(sharedData)
-    try data.write(to: sharedDataURL, options: .atomic)
+    let result = try store.write(ShareExtensionData(chats: chats, users: users))
+    if let legacySharedDataURL, FileManager.default.fileExists(atPath: legacySharedDataURL.path) {
+      try? FileManager.default.removeItem(at: legacySharedDataURL)
+    }
+    return result
   }
 
   // Load shared data (used by both app and extension)
   func loadSharedData() -> SharedData? {
-    guard let sharedDataURL else {
-      Log.shared.error("Unable to resolve app group container for shared data")
+    guard let store else {
+      log.error("Unable to resolve app group container for shared data")
       return nil
     }
-    guard FileManager.default.fileExists(atPath: sharedDataURL.path) else { return nil }
 
-    do {
-      let data = try Data(contentsOf: sharedDataURL)
-      return try JSONDecoder().decode(SharedData.self, from: data)
-    } catch {
-      Log.shared.warning("Failed to load share-extension data: \(error.localizedDescription)")
+    switch store.read(ShareExtensionData.self) {
+    case let .current(snapshot), let .unverified(snapshot):
+      return SharedData(shareExtensionData: snapshot.payload, lastUpdate: snapshot.writtenAt)
+    case .missing:
+      return loadLegacySharedData()
+    case .signedOut:
+      log.info("Share data hidden: no account is signed in")
+      return nil
+    case .otherOwner:
+      log.warning("Share data ignored: written for another sign-in")
+      return nil
+    case .incompatible:
+      log.warning("Share data ignored: unreadable or another schema version")
       return nil
     }
   }
 
+  private func loadLegacySharedData() -> SharedData? {
+    guard let legacySharedDataURL,
+          let data = try? Data(contentsOf: legacySharedDataURL),
+          let legacy = try? JSONDecoder().decode(LegacySharedData.self, from: data)
+    else { return nil }
+    return SharedData(shareExtensionData: legacy.shareExtensionData, lastUpdate: legacy.lastUpdate)
+  }
+
   // Clear shared data file
   func clearSharedData() throws {
-    guard let sharedContainerURL else {
+    guard let store, let containerURL = SharedSnapshotStore.appGroupContainerURL else {
       throw SharedDataBridgeError.containerUnavailable
     }
 
+    try store.remove(ShareExtensionData.self)
+    try store.remove(WidgetChatsSnapshot.self)
     try ShareExtensionCacheCleanup.clear(
-      containerURL: sharedContainerURL,
-      payloadFileName: shareDataFileName,
+      containerURL: containerURL,
+      payloadFileName: legacyShareDataFileName,
       avatarDirectoryName: intentAvatarDirectoryName
     )
-    Log.shared.info("Cleared share-extension recipient data")
+    log.info("Cleared share-extension and widget data")
   }
 }

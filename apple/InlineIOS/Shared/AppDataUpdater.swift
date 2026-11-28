@@ -4,8 +4,10 @@ import ImageIO
 import InlineAvatarRendering
 import InlineIntents
 import InlineKit
+import InlineSharedSnapshot
 import Logger
 import UIKit
+import WidgetKit
 
 actor AppDataUpdater {
   static let shared = AppDataUpdater()
@@ -45,12 +47,23 @@ actor AppDataUpdater {
       refreshRequestedWhileRunning = false
       let task = Task.detached(priority: .utility) {
         do {
-          let data = try await Self.fetchShareExtensionData()
+          let snapshots = try await Self.fetchHomeSnapshots()
+          let data = try Self.makeShareExtensionData(from: snapshots)
           try Task.checkCancellation()
-          try BridgeManager.shared.saveSharedData(chats: data.chats, users: data.users)
-          Self.log.info("Refreshed share-extension data for \(data.chats.count) chats")
+          let shareWrite = try BridgeManager.shared.saveSharedData(chats: data.chats, users: data.users)
+          Self.log.info("Share-extension data for \(data.chats.count) chats: \(shareWrite)")
+
+          try Task.checkCancellation()
+          let widget = Self.makeWidgetSnapshot(from: snapshots, shareData: data)
+          if try BridgeManager.shared.store?.write(widget) == .written {
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetChatsSnapshot.widgetKind)
+            Self.log.info("Widget data for \(widget.chats.count) chats written")
+          }
         } catch is CancellationError {
           // Logout owns cache cleanup and intentionally cancels an in-flight refresh.
+        } catch let error as SharedSnapshotError {
+          // Signed out, or the keychain is locked: keep the last snapshot for its owner to check.
+          Self.log.info("Skipped shared data refresh: \(error)")
         } catch {
           Self.log.error("Failed to refresh share-extension data", error: error)
         }
@@ -70,6 +83,7 @@ actor AppDataUpdater {
       self.refreshTask = nil
     }
     try BridgeManager.shared.clearSharedData()
+    WidgetCenter.shared.reloadTimelines(ofKind: WidgetChatsSnapshot.widgetKind)
   }
 
   func resumeSharedDataUpdates() {
@@ -129,12 +143,64 @@ actor AppDataUpdater {
     return chat?.intentDonationRequest(users: data.users, direction: .outgoing)
   }
 
-  private static func fetchShareExtensionData() async throws -> ShareExtensionData {
-    let snapshots: [HomeChatListItemSnapshot] = try await AppDatabase.shared.reader.read { db in
+  private static func fetchHomeSnapshots() async throws -> [HomeChatListItemSnapshot] {
+    try await AppDatabase.shared.reader.read { db in
       let items = try HomeChatItem.all().fetchAll(db)
       return try HomeChatListItemSnapshot.snapshots(from: items, db: db)
     }
-    return try makeShareExtensionData(from: snapshots)
+  }
+
+  /// The top of the chat list in its on-screen order. Avatars reuse the exports made for the share
+  /// extension, so the widget never decodes a full-size photo.
+  private static func makeWidgetSnapshot(
+    from snapshots: [HomeChatListItemSnapshot],
+    shareData: ShareExtensionData
+  ) -> WidgetChatsSnapshot {
+    let visible = snapshots.filter { !$0.archived }
+    let avatarPaths = Dictionary(
+      shareData.users.compactMap { user in user.profileSharedLocalPath.map { (user.id, $0) } },
+      uniquingKeysWith: { first, _ in first }
+    )
+
+    let chats = visible.prefix(WidgetChatsSnapshot.maximumChatCount).map { snapshot in
+      let item = snapshot.item
+      let kind: WidgetChat.Kind
+      let avatarPath: String?
+      let deepLink: InlineDeepLink?
+      switch snapshot.peerId {
+      case let .user(id):
+        kind = .user
+        avatarPath = avatarPaths[id]
+        deepLink = .user(id: id)
+      case let .thread(id):
+        kind = .thread
+        avatarPath = nil
+        deepLink = .chat(id: snapshot.chatId ?? id)
+      }
+
+      return WidgetChat(
+        id: snapshot.id,
+        kind: kind,
+        title: snapshot.title,
+        preview: snapshot.preview
+          .components(separatedBy: .newlines)
+          .joined(separator: " ")
+          .trimmingCharacters(in: .whitespacesAndNewlines),
+        date: snapshot.sortDate == .distantPast ? nil : snapshot.sortDate,
+        unreadCount: max(item.dialog.unreadCount ?? 0, 0),
+        isUnread: snapshot.unread,
+        isPinned: snapshot.pinned,
+        emoji: item.chat?.emoji,
+        initials: WidgetChat.initials(for: snapshot.title),
+        avatarPath: avatarPath,
+        deepLink: deepLink?.url?.absoluteString
+      )
+    }
+
+    return WidgetChatsSnapshot(
+      chats: Array(chats),
+      unreadChatCount: visible.count(where: \.unread)
+    )
   }
 
   private static func fetchShareExtensionData(
