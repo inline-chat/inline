@@ -135,6 +135,9 @@ final class MessageActionsView: UIView {
         if let alert = event.alert {
           MessageActionPerformer.presentAlert(alert, from: self)
         }
+        if let openURL = event.openURL {
+          MessageActionPerformer.openResponseURL(openURL, pressedAt: event.pressedAt, from: self)
+        }
       }
   }
 

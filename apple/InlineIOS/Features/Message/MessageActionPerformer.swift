@@ -65,6 +65,62 @@ enum MessageActionPerformer {
     }
   }
 
+  /// A bot's answer to a press made on this device: toast, alert, or a URL to
+  /// open in the default browser while the press is still fresh.
+  static func presentResponse(_ ui: BotResponseUi, pressedAt: Date, from view: UIView) {
+    switch ui {
+    case let .toast(text):
+      ToastManager.shared.showToast(text, type: .info)
+    case let .alert(alert):
+      presentAlert(alert, from: view)
+    case let .openURL(open):
+      openResponseURL(open, pressedAt: pressedAt, from: view)
+    }
+  }
+
+  /// For answers with no message view to anchor them (Agent Settings): uses the key window.
+  static func presentResponse(_ ui: BotResponseUi, pressedAt: Date) {
+    let window = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap(\.windows)
+      .first(where: \.isKeyWindow)
+    guard let window else {
+      if case .toast = ui { presentResponse(ui, pressedAt: pressedAt, from: UIView()) }
+      return
+    }
+    presentResponse(ui, pressedAt: pressedAt, from: window)
+  }
+
+  static func openResponseURL(_ open: BotResponseOpenURL, pressedAt: Date, from view: UIView) {
+    Task { @MainActor [weak view] in
+      let decision = await BotResponseURLResolver.decide(open, pressedAt: pressedAt)
+      switch decision {
+      case let .open(url):
+        openExternally(url)
+      case let .confirm(url, confirmation):
+        guard let view else { return }
+        confirm([confirmation][...], destructive: false, from: view) { openExternally(url) }
+      case let .unreachable(alert):
+        guard let view else { return }
+        presentAlert(alert, from: view)
+      case .expired:
+        ToastManager.shared.showToast(
+          String(localized: "The link took too long to arrive. Try again."),
+          type: .info
+        )
+      }
+    }
+  }
+
+  private static func openExternally(_ url: URL) {
+    UIApplication.shared.open(url) { opened in
+      guard !opened else { return }
+      Task { @MainActor in
+        ToastManager.shared.showToast("No app can open this link", type: .error, systemImage: "exclamationmark.triangle")
+      }
+    }
+  }
+
   static func presentAlert(_ alert: MessageActionAlertContent, from view: UIView) {
     guard let presenter = presenter(for: view) else { return }
     let controller = UIAlertController(

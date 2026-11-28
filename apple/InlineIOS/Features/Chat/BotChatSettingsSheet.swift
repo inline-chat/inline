@@ -309,11 +309,19 @@ private struct BotChatSettingsIOSItem: View {
         }
         .accessibilityElement(children: .combine)
       }
-    case .button:
+    case let .button(opensURL):
       HStack {
         Button(label) { onInvoke(item.id, nil) }
           .disabled(item.isDisabled || isPending)
+          .accessibilityHint(opensURL ? String(localized: "Opens in your browser") : "")
         Spacer()
+        if opensURL, !isPending {
+          // Marks a row that leaves Inline, as Settings does for web links.
+          Image(systemName: "arrow.up.forward")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+        }
         pendingIndicator
       }
     case .folder:

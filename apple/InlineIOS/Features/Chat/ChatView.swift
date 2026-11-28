@@ -156,6 +156,14 @@ struct ChatView: View {
     }
   }
 
+  /// Shows an agent's answer to a pressed Agent Settings item, such as opening
+  /// its dashboard, even after the sheet closes.
+  private static func presentBotSettingsAnswers(from coordinator: BotChatSettingsCoordinator) {
+    coordinator.responseUiHandler = { ui, pressedAt in
+      MessageActionPerformer.presentResponse(ui, pressedAt: pressedAt)
+    }
+  }
+
   /// What replaces the composer when this is a chat with a bot the viewer
   /// can't message. Nil for everything else, including "not known yet".
   private var botNoAccessNotice: BotNoAccessNotice? {
@@ -322,6 +330,7 @@ struct ChatView: View {
     }
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
+        .onAppear { Self.presentBotSettingsAnswers(from: botChatSettingsCoordinator) }
     }
     .sheet(item: $presentedChatInfo, onDismiss: { renameRequested = false }) { chatItem in
       chatInfoSheet(chatItem)
