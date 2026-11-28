@@ -203,8 +203,10 @@ export const inlineUploads = pgTable(
       .references(() => sessions.id, { onDelete: "cascade" }),
     fileName: encryptedText("file_name", "uploads.fileName").notNull(),
     mimeType: varchar("mime_type", { length: 255 }).notNull(),
-    byteCount: bigint("byte_count", { mode: "bigint" }).notNull(),
-    sha256: bytea("sha256").notNull(),
+    // Null until finish when the client streams a file whose size it doesn't know yet (a video
+    // still encoding). The hash is optional: clients may send it, nothing needs it.
+    byteCount: bigint("byte_count", { mode: "bigint" }),
+    sha256: bytea("sha256"),
     kind: varchar("kind", { length: 16 }).notNull(),
     thumbnailFileUniqueId: varchar("thumbnail_file_unique_id", { length: 128 }),
     videoWidth: integer("video_width"),
@@ -214,7 +216,7 @@ export const inlineUploads = pgTable(
     hasAudio: boolean("has_audio"),
     waveform: encryptedBytes("waveform", "voice.waveform"),
     partSize: integer("part_size").notNull(),
-    partCount: integer("part_count").notNull(),
+    partCount: integer("part_count"),
     status: varchar("status", { length: 16 }).default("uploading").notNull(),
     failureCode: varchar("failure_code", { length: 32 }),
     failureRetryable: boolean("failure_retryable"),
@@ -263,7 +265,7 @@ export const inlineUploads = pgTable(
     ),
     storageFormatValid: check(
       "inline_uploads_storage_format_valid",
-      sql`${table.storageFormat} is null or ${table.storageFormat} = 'identity_v1'`,
+      sql`${table.storageFormat} is null or ${table.storageFormat} in ('identity_v1', 'blocks_v1')`,
     ),
     storageSessionValid: check(
       "inline_uploads_storage_session_valid",
@@ -334,6 +336,8 @@ export const inlineUploadStorageParts = pgTable(
     partNumber: integer("part_number").notNull(),
     storedByteCount: integer("stored_byte_count").notNull(),
     storedSha256: bytea("stored_sha256").notNull(),
+    // blocks_v1: the SHA-256 of each 512 KiB part in the block, concatenated, for `file_part_hashes`.
+    partHashes: bytea("part_hashes"),
     etag: text("etag").notNull(),
     completedAt: protocolTimestamp("completed_at").defaultNow().notNull(),
   },

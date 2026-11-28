@@ -267,6 +267,7 @@ describe("native upload repository", () => {
       "partSize",
       "status",
       "storageFormat",
+      "storageUploadId",
     ])
     expect(partTarget?.expired).toBe(false)
 

@@ -12,8 +12,10 @@ const DEFAULT_MAX_ENTRIES = 4_096
  */
 export type UploadGeometry = {
   readonly uploadDbId: number
-  readonly byteCount: bigint
+  /** Null while a `blocks_v1` upload streams a file of unknown size. */
+  readonly byteCount: bigint | null
   readonly partSize: number
+  /** The part count, or while the size is unknown the most parts the upload may have. */
   readonly partCount: number
   readonly hardExpiresAt: Date
   readonly owner: InlineUploadOwner
@@ -43,7 +45,7 @@ export class UploadGeometryCache {
   put(input: {
     uploadId: Uint8Array
     uploadDbId: number
-    byteCount: bigint
+    byteCount: bigint | null
     partSize: number
     partCount: number
     hardExpiresAt: Date
@@ -114,8 +116,9 @@ export class UploadGeometryCache {
   }
 }
 
+/** A part's length; while the size is unknown every part is full except the last, sent whole. */
 export const expectedPartLength = (geometry: Pick<UploadGeometry, "byteCount" | "partSize" | "partCount">, partIndex: number): number =>
-  partIndex === geometry.partCount - 1
+  geometry.byteCount !== null && partIndex === geometry.partCount - 1
     ? Number(geometry.byteCount - BigInt(geometry.partSize) * BigInt(geometry.partCount - 1))
     : geometry.partSize
 

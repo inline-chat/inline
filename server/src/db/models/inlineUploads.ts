@@ -32,18 +32,85 @@ import {
   type DbInlineUpload,
 } from "@in/server/db/schema"
 import { decrypt } from "@in/server/modules/encryption/encryption"
-import { partHashesFromManifest } from "@in/server/modules/files/partHashes"
+import { isValidPartHashes, partHashesFromManifest } from "@in/server/modules/files/partHashes"
+import { MAX_FILE_SIZE } from "@in/server/config"
+import { MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/limits"
 import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "@inline-chat/protocol/transfers"
 
 export const INLINE_UPLOAD_PART_SIZE = INLINE_TRANSFER_PART_SIZE
 export { INLINE_UPLOAD_MAX_PARTS }
 export const INLINE_UPLOAD_IDLE_TTL_MS = 24 * 60 * 60 * 1_000
 export const INLINE_UPLOAD_HARD_TTL_MS = 7 * 24 * 60 * 60 * 1_000
+/**
+ * Idle lifetime of an upload whose size is not known yet (a video streaming while it encodes). It
+ * reserves its kind's maximum against the session, and a client that dies mid-encode never
+ * cancels it; each stored block, and naming the size, extend it.
+ */
+export const INLINE_UPLOAD_UNSIZED_IDLE_TTL_MS = 60 * 60 * 1_000
 // Provider operations are independently deadline-bounded and the lock token
 // fences every durable transition. A short renewable lease keeps crash
 // recovery prompt without allowing a stale worker to publish.
 export const INLINE_UPLOAD_PROCESSING_LEASE_MS = 30_000
 const INLINE_UPLOAD_PUBLICATION_PREFIX = "native-uploads/v1"
+
+/**
+ * Uploads whose parts this server holds in memory and writes to storage once, ten parts (5 MiB)
+ * at a time, straight into the final object: no staging objects and no per-part rows. A process
+ * that dies loses only the blocks it had not written yet, and the client resends those parts.
+ */
+export const BLOCKS_STORAGE_FORMAT = "blocks_v1"
+export type InlineUploadStorageFormat = "identity_v1" | typeof BLOCKS_STORAGE_FORMAT
+/** Parts per block; one block is one part of the final object's multipart session. */
+export const INLINE_UPLOAD_PARTS_PER_BLOCK = 10
+/**
+ * The storage row of a `blocks_v1` upload of one block, written with a single PutObject at its
+ * final key instead of a multipart session.
+ */
+export const WHOLE_OBJECT_STORAGE_UPLOAD_ID = "object"
+
+/** The largest size an upload of this kind may reach; reserved while its size is unknown. */
+export const inlineUploadMaximumByteCount = (kind: InlineUploadKind): bigint =>
+  BigInt(Math.min(MAX_FILE_SIZE, MEDIA_UPLOAD_MAX_BYTES[kind]))
+
+/** Parts an upload of this kind may have; the bound while its size is unknown. */
+export const inlineUploadMaximumPartCount = (kind: InlineUploadKind): number => Math.min(
+  INLINE_UPLOAD_MAX_PARTS,
+  Number((inlineUploadMaximumByteCount(kind) + BigInt(INLINE_TRANSFER_PART_SIZE - 1)) /
+    BigInt(INLINE_TRANSFER_PART_SIZE)),
+)
+
+const PART_HASH_BYTES = 32
+
+/**
+ * Parts a `blocks_v1` upload holds in storage. A block row lists a hash per part it holds, so it
+ * covers that many parts from its first; a whole-object row covers the file from part 0. Rows of
+ * another (abandoned) multipart session cover nothing.
+ */
+/** `files.part_hashes` from a `blocks_v1` upload's block rows, in order; undefined if any is absent. */
+const blockPartHashes = (
+  storageParts: readonly InlineUploadStoragePartRecord[],
+  fileSize: number,
+): Buffer | undefined => {
+  const hashes = Buffer.concat(storageParts.map((part) => Buffer.from(part.partHashes ?? new Uint8Array())))
+  return isValidPartHashes(hashes, fileSize) ? hashes : undefined
+}
+
+export const storedBlockParts = (
+  upload: { storageUploadId: string | null },
+  storageParts: readonly { storageUploadId: string; partNumber: number; partHashes: Uint8Array | null }[],
+): number[] => {
+  const parts: number[] = []
+  for (const block of storageParts) {
+    if (block.storageUploadId !== WHOLE_OBJECT_STORAGE_UPLOAD_ID &&
+        block.storageUploadId !== upload.storageUploadId) continue
+    const count = Math.floor((block.partHashes?.byteLength ?? 0) / PART_HASH_BYTES)
+    const first = block.storageUploadId === WHOLE_OBJECT_STORAGE_UPLOAD_ID
+      ? 0
+      : (block.partNumber - 1) * INLINE_UPLOAD_PARTS_PER_BLOCK
+    for (let index = first; index < first + count; index++) parts.push(index)
+  }
+  return [...new Set(parts)].sort((left, right) => left - right)
+}
 
 export type InlineUploadKind = "photo" | "video" | "document" | "voice"
 
@@ -57,8 +124,10 @@ export type InlineUploadMetadata = {
   clientUploadId: Uint8Array
   fileName: string
   mimeType: string
-  byteCount: bigint
-  sha256: Uint8Array
+  /** Null while the client streams a file of unknown size; the finish names it. */
+  byteCount: bigint | null
+  /** Optional on `blocks_v1`: the transport already checks every message. */
+  sha256: Uint8Array | null
   kind: InlineUploadKind
   thumbnailFileUniqueId?: string
   videoWidth?: number
@@ -91,6 +160,8 @@ export type InlineUploadStoragePartRecord = {
   partNumber: number
   storedByteCount: number
   storedSha256: Uint8Array
+  /** `blocks_v1`: the SHA-256 of each part in the block, concatenated. */
+  partHashes: Uint8Array | null
   etag: string
   completedAt: Date
 }
@@ -105,6 +176,7 @@ export type InlineUploadPartTarget = Pick<
   | "expiresAt"
   | "hardExpiresAt"
   | "storageFormat"
+  | "storageUploadId"
 > & {
   expired: boolean
 }
@@ -225,8 +297,10 @@ const ownerKeyMatches = (owner: InlineUploadOwner) => owner.permanentAuthKeyId
 const sameMetadata = (row: DbInlineUpload, metadata: InlineUploadMetadata): boolean =>
   row.fileName === metadata.fileName &&
   row.mimeType === metadata.mimeType &&
-  row.byteCount === metadata.byteCount &&
-  sameBytes(row.sha256, metadata.sha256) &&
+  // A size named at finish was unknown at create; the create's replay still matches.
+  (row.byteCount === metadata.byteCount ||
+    (metadata.byteCount === null && row.storageFormat === BLOCKS_STORAGE_FORMAT)) &&
+  sameOptionalBytes(row.sha256, metadata.sha256 ?? undefined) &&
   row.kind === metadata.kind &&
   // A create may leave the thumbnail to finish; its replay then matches the finished row too.
   (row.thumbnailFileUniqueId === (metadata.thumbnailFileUniqueId ?? null) ||
@@ -249,12 +323,32 @@ const isUniqueViolation = (error: unknown): boolean => {
 /** A lease older than this, measured on the database clock, may be taken over. */
 const staleLeaseCutoff = sql<Date>`CURRENT_TIMESTAMP - (${INLINE_UPLOAD_PROCESSING_LEASE_MS} * interval '1 millisecond')`
 
-const acceptedPartsFor = async (uploadDbId: number): Promise<number[]> =>
-  (await db.select({ partIndex: inlineUploadParts.partIndex })
+type Queryable = Pick<typeof db, "select">
+
+/** Storage rows of the upload's current session, plus a whole-object row. */
+const storagePartsFor = async (
+  client: Queryable,
+  row: { id: number; storageUploadId: string | null },
+): Promise<InlineUploadStoragePartRecord[]> => {
+  const sessions = [WHOLE_OBJECT_STORAGE_UPLOAD_ID, ...(row.storageUploadId ? [row.storageUploadId] : [])]
+  return (await client.select().from(inlineUploadStorageParts).where(and(
+    eq(inlineUploadStorageParts.uploadDbId, row.id),
+    inArray(inlineUploadStorageParts.storageUploadId, sessions),
+  )).orderBy(asc(inlineUploadStorageParts.partNumber))).map(storagePartRecord)
+}
+
+/** Parts in storage: `blocks_v1` from its block rows, older formats from their part manifest. */
+const acceptedPartsFor = async (
+  row: { id: number; storageFormat: string | null; storageUploadId: string | null },
+  client: Queryable = db,
+): Promise<number[]> => {
+  if (row.storageFormat === BLOCKS_STORAGE_FORMAT) return storedBlockParts(row, await storagePartsFor(client, row))
+  return (await client.select({ partIndex: inlineUploadParts.partIndex })
     .from(inlineUploadParts)
-    .where(eq(inlineUploadParts.uploadDbId, uploadDbId))
+    .where(eq(inlineUploadParts.uploadDbId, row.id))
     .orderBy(asc(inlineUploadParts.partIndex)))
     .map(({ partIndex }) => partIndex)
+}
 
 const uploadPartRecord = (part: typeof inlineUploadParts.$inferSelect): InlineUploadPartRecord => ({
   ...part,
@@ -265,12 +359,15 @@ const uploadPartRecord = (part: typeof inlineUploadParts.$inferSelect): InlineUp
   storedSha256: Uint8Array.from(part.storedSha256 ?? part.sha256),
 })
 
-const storagePartRecord = (
+function storagePartRecord(
   part: typeof inlineUploadStorageParts.$inferSelect,
-): InlineUploadStoragePartRecord => ({
-  ...part,
-  storedSha256: Uint8Array.from(part.storedSha256),
-})
+): InlineUploadStoragePartRecord {
+  return {
+    ...part,
+    storedSha256: Uint8Array.from(part.storedSha256),
+    partHashes: part.partHashes ? Uint8Array.from(part.partHashes) : null,
+  }
+}
 
 const decryptRequiredText = (input: {
   encrypted: Buffer | null
@@ -350,7 +447,7 @@ export class InlineUploadRepository {
         gt(inlineUploads.expiresAt, now),
         gt(inlineUploads.hardExpiresAt, now),
       ))
-    return rows.reduce((total, row) => total + row.byteCount, 0n)
+    return rows.reduce((total, row) => total + (row.byteCount ?? 0n), 0n)
   }
 
   async resolveOwner(input: {
@@ -402,24 +499,30 @@ export class InlineUploadRepository {
     admission?: { maxActiveCount: number; maxReservedBytes: bigint },
     /** The client's proposed upload ID (CreateUploadInput.upload_id); random when absent. */
     proposedUploadId?: Uint8Array,
+    storageFormat: InlineUploadStorageFormat = "identity_v1",
   ): Promise<{
     upload: InlineUploadRecord
     created: boolean
   }> {
+    // Only `blocks_v1` stores without a size or digest.
+    if (storageFormat !== BLOCKS_STORAGE_FORMAT && (metadata.byteCount === null || metadata.sha256 === null)) {
+      throw new InlineUploadMetadataConflictError()
+    }
     try {
-      return await this.#create(owner, metadata, admission, proposedUploadId)
+      return await this.#create(owner, metadata, admission, proposedUploadId, storageFormat)
     } catch (error) {
       // Two creates proposing one ID at once: the second falls back to a server-picked ID.
       if (proposedUploadId === undefined || !isUniqueViolation(error)) throw error
-      return await this.#create(owner, metadata, admission)
+      return await this.#create(owner, metadata, admission, undefined, storageFormat)
     }
   }
 
   async #create(
     owner: InlineUploadOwner,
     metadata: InlineUploadMetadata,
-    admission?: { maxActiveCount: number; maxReservedBytes: bigint },
-    proposedUploadId?: Uint8Array,
+    admission: { maxActiveCount: number; maxReservedBytes: bigint } | undefined,
+    proposedUploadId: Uint8Array | undefined,
+    storageFormat: InlineUploadStorageFormat,
   ): Promise<{
     upload: InlineUploadRecord
     created: boolean
@@ -445,16 +548,12 @@ export class InlineUploadRepository {
             !sameMetadata(existing, metadata)) {
           throw new InlineUploadMetadataConflictError()
         }
-        const acceptedParts = (await tx.select({ partIndex: inlineUploadParts.partIndex })
-          .from(inlineUploadParts)
-          .where(eq(inlineUploadParts.uploadDbId, existing.id))
-          .orderBy(asc(inlineUploadParts.partIndex)))
-          .map(({ partIndex }) => partIndex)
+        const acceptedParts = await acceptedPartsFor(existing, tx)
         return { upload: { ...existing, acceptedParts }, created: false }
       }
 
       if (admission) {
-        const active = await tx.select({ byteCount: inlineUploads.byteCount })
+        const active = await tx.select({ byteCount: inlineUploads.byteCount, kind: inlineUploads.kind })
           .from(inlineUploads)
           .where(and(
             eq(inlineUploads.userId, owner.userId),
@@ -463,9 +562,12 @@ export class InlineUploadRepository {
             gt(inlineUploads.expiresAt, now),
             gt(inlineUploads.hardExpiresAt, now),
           ))
-        const reservedBytes = active.reduce((total, row) => total + row.byteCount, 0n)
+        // An upload whose size is unknown reserves the most its kind may reach.
+        const reservedBytes = active.reduce((total, row) =>
+          total + (row.byteCount ?? inlineUploadMaximumByteCount(row.kind as InlineUploadKind)), 0n)
+        const requestedBytes = metadata.byteCount ?? inlineUploadMaximumByteCount(metadata.kind)
         if (active.length >= admission.maxActiveCount ||
-            reservedBytes + metadata.byteCount > admission.maxReservedBytes) {
+            reservedBytes + requestedBytes > admission.maxReservedBytes) {
           throw new InlineUploadAdmissionCapacityError()
         }
       }
@@ -477,8 +579,8 @@ export class InlineUploadRepository {
         .where(eq(inlineUploads.uploadId, Buffer.from(proposedUploadId)))
         .limit(1)).length > 0
       const uploadId = proposedUploadId && !proposedTaken ? Buffer.from(proposedUploadId) : randomBytes(16)
-      const partCount = Number((metadata.byteCount + BigInt(INLINE_UPLOAD_PART_SIZE - 1)) /
-        BigInt(INLINE_UPLOAD_PART_SIZE))
+      const partCount = metadata.byteCount === null ? null : Number((metadata.byteCount +
+        BigInt(INLINE_UPLOAD_PART_SIZE - 1)) / BigInt(INLINE_UPLOAD_PART_SIZE))
       const resultFileUniqueId = inlineUploadFileUniqueId({ uploadId, kind: metadata.kind })
       const [inserted] = await tx.insert(inlineUploads).values({
         uploadId,
@@ -491,7 +593,7 @@ export class InlineUploadRepository {
         fileName: metadata.fileName,
         mimeType: metadata.mimeType,
         byteCount: metadata.byteCount,
-        sha256: Buffer.from(metadata.sha256),
+        sha256: metadata.sha256 ? Buffer.from(metadata.sha256) : null,
         kind: metadata.kind,
         thumbnailFileUniqueId: metadata.thumbnailFileUniqueId,
         videoWidth: metadata.videoWidth,
@@ -502,9 +604,10 @@ export class InlineUploadRepository {
         waveform: metadata.waveform ? Buffer.from(metadata.waveform) : undefined,
         partSize: INLINE_UPLOAD_PART_SIZE,
         partCount,
-        storageFormat: "identity_v1",
+        storageFormat,
         resultFileUniqueId,
-        expiresAt: new Date(now.getTime() + INLINE_UPLOAD_IDLE_TTL_MS),
+        expiresAt: new Date(now.getTime() +
+          (metadata.byteCount === null ? INLINE_UPLOAD_UNSIZED_IDLE_TTL_MS : INLINE_UPLOAD_IDLE_TTL_MS)),
         hardExpiresAt: new Date(now.getTime() + INLINE_UPLOAD_HARD_TTL_MS),
       }).onConflictDoNothing({
         target: [inlineUploads.accountSessionId, inlineUploads.clientUploadId],
@@ -519,13 +622,7 @@ export class InlineUploadRepository {
           !sameMetadata(row, metadata)) {
         throw new InlineUploadMetadataConflictError()
       }
-      const acceptedParts = inserted
-        ? []
-        : (await tx.select({ partIndex: inlineUploadParts.partIndex })
-          .from(inlineUploadParts)
-          .where(eq(inlineUploadParts.uploadDbId, row.id))
-          .orderBy(asc(inlineUploadParts.partIndex)))
-          .map(({ partIndex }) => partIndex)
+      const acceptedParts = inserted ? [] : await acceptedPartsFor(row, tx)
       return { upload: { ...row, acceptedParts }, created: inserted !== undefined }
     })
   }
@@ -546,7 +643,7 @@ export class InlineUploadRepository {
     const now = databaseTimestamp(databaseNow)
     return {
       ...row,
-      acceptedParts: await acceptedPartsFor(row.id),
+      acceptedParts: await acceptedPartsFor(row),
       expired: row.expiresAt <= now || row.hardExpiresAt <= now,
     }
   }
@@ -586,6 +683,7 @@ export class InlineUploadRepository {
       expiresAt: inlineUploads.expiresAt,
       hardExpiresAt: inlineUploads.hardExpiresAt,
       storageFormat: inlineUploads.storageFormat,
+      storageUploadId: inlineUploads.storageUploadId,
       databaseNow: sql<Date>`CURRENT_TIMESTAMP`,
       acceptedParts: sql<number[]>`coalesce((
         select array_agg(p.part_index order by p.part_index)
@@ -602,7 +700,10 @@ export class InlineUploadRepository {
     const now = databaseTimestamp(databaseNow)
     return {
       ...upload,
-      acceptedParts: acceptedParts.map(Number),
+      acceptedParts: upload.storageFormat === BLOCKS_STORAGE_FORMAT
+        ? await acceptedPartsFor({ id: upload.id, storageFormat: upload.storageFormat,
+          storageUploadId: upload.storageUploadId })
+        : acceptedParts.map(Number),
       expired: upload.expiresAt <= now || upload.hardExpiresAt <= now,
     }
   }
@@ -675,9 +776,12 @@ export class InlineUploadRepository {
     owner: InlineUploadOwner,
     /** Names the thumbnail when the create did not (FinishUploadInput.thumbnail_file_unique_id). */
     thumbnailFileUniqueId?: string,
+    /** `blocks_v1`: parts this process holds in blocks still incomplete; not reported missing. */
+    heldParts: ReadonlySet<number> = new Set(),
   ): Promise<
     | { kind: "missing"; partIndices: number[] }
     | { kind: "processing" }
+    | { kind: "pending" }
     | { kind: "queued"; uploadDbId: number; byteCount: bigint; partCount: number; uploadKind: InlineUploadKind }
     | { kind: "complete"; upload: InlineUploadRecord }
     | { kind: "failed"; upload: InlineUploadRecord }
@@ -698,18 +802,22 @@ export class InlineUploadRepository {
       if (!row || row.status === "canceled") {
         return { kind: "rejected" } as const
       }
-      const parts = await tx.select().from(inlineUploadParts)
-        .where(eq(inlineUploadParts.uploadDbId, row.id))
-        .orderBy(asc(inlineUploadParts.partIndex))
-      const upload = { ...row, acceptedParts: parts.map(({ partIndex }) => partIndex) }
+      const upload = { ...row, acceptedParts: await acceptedPartsFor(row, tx) }
       if (row.status === "complete") return { kind: "complete", upload } as const
       if (row.status === "failed") return { kind: "failed", upload } as const
       if (row.status === "processing") return { kind: "processing" } as const
       if (row.expiresAt <= now || row.hardExpiresAt <= now) return { kind: "rejected" } as const
-      const accepted = new Set(parts.map(({ partIndex }) => partIndex))
-      const missing = Array.from({ length: row.partCount }, (_, index) => index)
+      // The size is set before finishing (setSize) when the create did not name it.
+      if (row.partCount === null || row.byteCount === null) return { kind: "rejected" } as const
+      // `blocks_v1` reaches processing only once every byte is in storage: a part held here in a
+      // block that cannot be written yet is not missing, but it does not count as stored either.
+      const accepted = new Set(upload.acceptedParts)
+      const notStored = Array.from({ length: row.partCount }, (_, index) => index)
         .filter((index) => !accepted.has(index))
+      const missing = notStored.filter((index) => !heldParts.has(index))
       if (missing.length > 0) return { kind: "missing", partIndices: missing } as const
+      // Every part is here but a block is not stored yet: the next finish writes it.
+      if (notStored.length > 0) return { kind: "pending" } as const
       if (thumbnailFileUniqueId !== undefined &&
           ((row.kind !== "video" && row.kind !== "document") ||
            (row.thumbnailFileUniqueId !== null && row.thumbnailFileUniqueId !== thumbnailFileUniqueId))) {
@@ -731,6 +839,25 @@ export class InlineUploadRepository {
         uploadKind: row.kind as InlineUploadKind,
       } as const
     })
+  }
+
+  /**
+   * Names the size of a `blocks_v1` upload created without one. Returns false when the upload is
+   * not this owner's, not uploading, or already has a different size; a matching size is a no-op.
+   */
+  async setSize(uploadDbId: number, byteCount: bigint, partCount: number): Promise<boolean> {
+    const rows = await db.update(inlineUploads).set({
+      byteCount,
+      partCount,
+      expiresAt: sql<Date>`greatest(${inlineUploads.expiresAt},
+        least(${inlineUploads.hardExpiresAt}, CURRENT_TIMESTAMP + interval '24 hours'))`,
+    }).where(and(
+      eq(inlineUploads.id, uploadDbId),
+      eq(inlineUploads.status, "uploading"),
+      eq(inlineUploads.storageFormat, BLOCKS_STORAGE_FORMAT),
+      or(isNull(inlineUploads.byteCount), eq(inlineUploads.byteCount, byteCount)),
+    )).returning({ id: inlineUploads.id })
+    return rows.length === 1
   }
 
   async claimProcessing(uploadDbId?: number): Promise<InlineUploadProcessingClaim | undefined> {
@@ -768,17 +895,14 @@ export class InlineUploadRepository {
       const parts = await tx.select().from(inlineUploadParts)
         .where(eq(inlineUploadParts.uploadDbId, row.id))
         .orderBy(asc(inlineUploadParts.partIndex))
-      const storageParts = claimed.storageUploadId
-        ? await tx.select().from(inlineUploadStorageParts).where(and(
-          eq(inlineUploadStorageParts.uploadDbId, row.id),
-          eq(inlineUploadStorageParts.storageUploadId, claimed.storageUploadId),
-        )).orderBy(asc(inlineUploadStorageParts.partNumber))
-        : []
+      const storageParts = await storagePartsFor(tx, claimed)
       return {
-        upload: { ...claimed, acceptedParts: parts.map(({ partIndex }) => partIndex) },
+        upload: { ...claimed, acceptedParts: claimed.storageFormat === BLOCKS_STORAGE_FORMAT
+          ? storedBlockParts(claimed, storageParts)
+          : parts.map(({ partIndex }) => partIndex) },
         lockToken: Uint8Array.from(lockToken),
         parts: parts.map(uploadPartRecord),
-        storageParts: storageParts.map(storagePartRecord),
+        storageParts,
       }
     })
   }
@@ -810,17 +934,14 @@ export class InlineUploadRepository {
       const parts = await tx.select().from(inlineUploadParts)
         .where(eq(inlineUploadParts.uploadDbId, row.id))
         .orderBy(asc(inlineUploadParts.partIndex))
-      const storageParts = claimed.storageUploadId
-        ? await tx.select().from(inlineUploadStorageParts).where(and(
-          eq(inlineUploadStorageParts.uploadDbId, row.id),
-          eq(inlineUploadStorageParts.storageUploadId, claimed.storageUploadId),
-        )).orderBy(asc(inlineUploadStorageParts.partNumber))
-        : []
+      const storageParts = await storagePartsFor(tx, claimed)
       return {
-        upload: { ...claimed, acceptedParts: parts.map(({ partIndex }) => partIndex) },
+        upload: { ...claimed, acceptedParts: claimed.storageFormat === BLOCKS_STORAGE_FORMAT
+          ? storedBlockParts(claimed, storageParts)
+          : parts.map(({ partIndex }) => partIndex) },
         lockToken: Uint8Array.from(lockToken),
         parts: parts.map(uploadPartRecord),
-        storageParts: storageParts.map(storagePartRecord),
+        storageParts,
       }
     })
   }
@@ -844,16 +965,13 @@ export class InlineUploadRepository {
     const parts = await db.select().from(inlineUploadParts)
       .where(eq(inlineUploadParts.uploadDbId, row.id))
       .orderBy(asc(inlineUploadParts.partIndex))
-    const storageParts = row.storageUploadId
-      ? await db.select().from(inlineUploadStorageParts).where(and(
-        eq(inlineUploadStorageParts.uploadDbId, row.id),
-        eq(inlineUploadStorageParts.storageUploadId, row.storageUploadId),
-      )).orderBy(asc(inlineUploadStorageParts.partNumber))
-      : []
+    const storageParts = await storagePartsFor(db, row)
     return {
-      upload: { ...row, acceptedParts: parts.map(({ partIndex }) => partIndex) },
+      upload: { ...row, acceptedParts: row.storageFormat === BLOCKS_STORAGE_FORMAT
+        ? storedBlockParts(row, storageParts)
+        : parts.map(({ partIndex }) => partIndex) },
       parts: parts.map(uploadPartRecord),
-      storageParts: storageParts.map(storagePartRecord),
+      storageParts,
     }
   }
 
@@ -911,6 +1029,8 @@ export class InlineUploadRepository {
     storedSha256: Uint8Array
     etag: string
     lockToken?: Uint8Array
+    /** `blocks_v1`: the block's part hashes. */
+    partHashes?: Uint8Array
   }): Promise<"recorded" | "already-present" | "stale"> {
     return db.transaction(async (tx) => {
       const [row] = await tx.select({
@@ -919,7 +1039,9 @@ export class InlineUploadRepository {
         lockToken: inlineUploads.lockToken,
       }).from(inlineUploads).where(eq(inlineUploads.id, input.uploadDbId))
         .for("update").limit(1)
-      if (!row || row.storageUploadId !== input.storageUploadId) return "stale"
+      // A whole-object write has no session; it is recorded only while none was started.
+      const session = input.storageUploadId === WHOLE_OBJECT_STORAGE_UPLOAD_ID ? null : input.storageUploadId
+      if (!row || row.storageUploadId !== session) return "stale"
       const ownsStatus = input.lockToken
         ? (row.status === "uploading" || row.status === "processing") &&
           row.lockToken && sameBytes(row.lockToken, input.lockToken)
@@ -931,11 +1053,22 @@ export class InlineUploadRepository {
         partNumber: input.partNumber,
         storedByteCount: input.storedByteCount,
         storedSha256: Buffer.from(input.storedSha256),
+        partHashes: input.partHashes ? Buffer.from(input.partHashes) : null,
         etag: input.etag,
       }).onConflictDoNothing({
         target: [inlineUploadStorageParts.uploadDbId, inlineUploadStorageParts.partNumber],
       }).returning({ partNumber: inlineUploadStorageParts.partNumber })
-      if (inserted) return "recorded"
+      if (inserted) {
+        // `blocks_v1` has no part rows to keep an active upload from idling out; its blocks do.
+        if (row.status === "uploading") {
+          await tx.update(inlineUploads).set({
+            lastPartAt: sql<Date>`CURRENT_TIMESTAMP`,
+            expiresAt: sql<Date>`least(${inlineUploads.hardExpiresAt}, CURRENT_TIMESTAMP + case
+              when ${inlineUploads.byteCount} is null then interval '1 hour' else interval '24 hours' end)`,
+          }).where(eq(inlineUploads.id, input.uploadDbId))
+        }
+        return "recorded"
+      }
       const existing = (await tx.select().from(inlineUploadStorageParts).where(and(
         eq(inlineUploadStorageParts.uploadDbId, input.uploadDbId),
         eq(inlineUploadStorageParts.partNumber, input.partNumber),
@@ -1005,15 +1138,16 @@ export class InlineUploadRepository {
         throw new InlineUploadPublicationConflictError()
       }
 
-      // Range hashes come from the manifest verified at receipt, never from storage.
-      const manifest = await tx.select({
-        partIndex: inlineUploadParts.partIndex,
-        byteCount: inlineUploadParts.byteCount,
-        sha256: inlineUploadParts.sha256,
-      }).from(inlineUploadParts)
-        .where(eq(inlineUploadParts.uploadDbId, upload.id))
-        .orderBy(asc(inlineUploadParts.partIndex))
-      const partHashes = partHashesFromManifest(manifest, Number(upload.byteCount))
+      // Range hashes come from the bytes hashed at receipt, never from storage.
+      const partHashes = upload.storageFormat === BLOCKS_STORAGE_FORMAT
+        ? blockPartHashes(await storagePartsFor(tx, upload), Number(upload.byteCount))
+        : partHashesFromManifest(await tx.select({
+          partIndex: inlineUploadParts.partIndex,
+          byteCount: inlineUploadParts.byteCount,
+          sha256: inlineUploadParts.sha256,
+        }).from(inlineUploadParts)
+          .where(eq(inlineUploadParts.uploadDbId, upload.id))
+          .orderBy(asc(inlineUploadParts.partIndex)), Number(upload.byteCount))
       const [insertedFile] = await tx.insert(files)
         .values(publication.file.record)
         .onConflictDoNothing({ target: files.fileUniqueId })

@@ -190,7 +190,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
       if (BigInt((await handle.stat()).size) !== input.upload.byteCount) throw new UploadIntegrityError()
       await handle.close()
       syncMs = Date.now() - syncStartedAt
-      if (byteCount !== input.upload.byteCount ||
+      if (byteCount !== input.upload.byteCount || !input.upload.sha256 ||
           !sameBytes(digest.digest(), input.upload.sha256)) {
         throw new UploadIntegrityError()
       }
@@ -249,7 +249,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         const bytes = result.value
         digest.update(bytes)
         byteCount += BigInt(bytes.byteLength)
-        if (byteCount > input.upload.byteCount) throw new UploadIntegrityError()
+        if (input.upload.byteCount === null || byteCount > input.upload.byteCount) throw new UploadIntegrityError()
         let written = 0
         while (written < bytes.byteLength) {
           const result = await handle.write(bytes, written, bytes.byteLength - written)
@@ -260,8 +260,12 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
       await handle.sync()
       await handle.close()
       handle = undefined
+      // A `blocks_v1` upload may come without a digest: every part was hashed at receipt and the
+      // transport checked every message.
       if (byteCount !== input.upload.byteCount ||
-          !sameBytes(digest.digest(), input.upload.sha256)) throw new UploadIntegrityError()
+          (input.upload.sha256 !== null && !sameBytes(digest.digest(), input.upload.sha256))) {
+        throw new UploadIntegrityError()
+      }
       const file = new File([Bun.file(path)], input.upload.fileName, { type: input.upload.mimeType })
       const publication = await this.#preparePublication(
         file,

@@ -18,7 +18,9 @@ import { createHash } from "node:crypto"
 import { MAX_FILE_SIZE } from "@in/server/config"
 import { decodedDocumentName, MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/metadata"
 import {
+  BLOCKS_STORAGE_FORMAT,
   INLINE_UPLOAD_MAX_PARTS,
+  INLINE_UPLOAD_PARTS_PER_BLOCK,
   InlineUploadAdmissionCapacityError,
   InlineUploadAdmissionOwnerInvalidError,
   InlineUploadMetadataConflictError,
@@ -27,6 +29,9 @@ import {
   type InlineUploadMetadata,
   type InlineUploadOwner,
   type InlineUploadRecord,
+  type InlineUploadStorageFormat,
+  inlineUploadMaximumByteCount,
+  inlineUploadMaximumPartCount,
 } from "@in/server/db/models/inlineUploads"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -43,6 +48,7 @@ import { R2MultipartObjectStore } from "./multipartStore"
 import { IDENTITY_STORAGE_FORMAT, storageCodecFor } from "./storageCodec"
 import { NativeUploadWorker, uploadTraceKey } from "./worker"
 import { UploadGroupBuffer, uploadGroupBuffer } from "./groupBuffer"
+import { UploadBlockBuffer, uploadBlockBuffer } from "./blockBuffer"
 import { uploadTraceLogLevel } from "./trace"
 import {
   UploadGeometryCache,
@@ -80,6 +86,14 @@ const SHUTDOWN_DRAIN_MS = 25_000
 const EARLY_PART_CREATE_WAIT_MS = 3_000
 /** Parts of one session waiting for a create; beyond this a part for an unknown upload fails at once. */
 const MAX_EARLY_PART_WAITS_PER_SESSION = 8
+/**
+ * A process creates `blocks_v1` uploads only once it has run this long. A blue-green deploy runs
+ * the previous release's machines alongside the new ones until these pass their checks, and a
+ * release without `blocks_v1` fails such an upload if its worker claims it. Creates that need the
+ * format (no digest or size) take it at once: only a client that already saw it sends one.
+ * Remove with the staging path, once its uploads have expired.
+ */
+const BLOCKS_CREATE_AFTER_UPTIME_MS = 10 * 60_000
 
 const kindFor = (kind: UploadKind): InlineUploadKind | undefined => {
   switch (kind) {
@@ -106,18 +120,24 @@ const throwIfAborted = (signal: AbortSignal | undefined): void => {
   if (signal?.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError")
 }
 
-const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
+/**
+ * `blocks`: this server stores the upload as `blocks_v1`, which takes no digest and, for a video,
+ * no size (CreateUploadResult.size_at_finish).
+ */
+const validateCreate = (input: CreateUploadInput, blocks: boolean): InlineUploadMetadata => {
   const kind = kindFor(input.kind)
   const fileName = input.fileName.trim()
   const mimeType = input.mimeType.trim().toLowerCase()
-  if (!kind || input.clientUploadId.length !== 16 || input.sha256.length !== 32 ||
+  const sizeAtFinish = blocks && kind === "video" && input.byteCount === 0n && input.inlineData === undefined
+  const digestless = blocks && input.sha256.length === 0
+  if (!kind || input.clientUploadId.length !== 16 || (input.sha256.length !== 32 && !digestless) ||
       !fileName || fileName.length > 255 || fileName.includes("\0") ||
-      !mimeType || mimeType.length > 255 || input.byteCount <= 0n ||
+      !mimeType || mimeType.length > 255 || (input.byteCount <= 0n && !sizeAtFinish) ||
       input.byteCount > BigInt(Math.min(MAX_FILE_SIZE, MEDIA_UPLOAD_MAX_BYTES[kind]))) return badRequest()
   if (kind === "document" && !decodedDocumentName(fileName)) return badRequest()
   const partCount = Number((input.byteCount + BigInt(INLINE_TRANSFER_PART_SIZE - 1)) /
     BigInt(INLINE_TRANSFER_PART_SIZE))
-  if (partCount < 1 || partCount > INLINE_UPLOAD_MAX_PARTS) return badRequest()
+  if ((partCount < 1 && !sizeAtFinish) || partCount > INLINE_UPLOAD_MAX_PARTS) return badRequest()
   if (input.uploadId !== undefined && input.uploadId.length !== 16) return badRequest()
   if (input.thumbnailFileUniqueId !== undefined &&
       (input.thumbnailFileUniqueId.length < 1 || input.thumbnailFileUniqueId.length > 128 ||
@@ -132,8 +152,8 @@ const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
     clientUploadId: input.clientUploadId.slice(),
     fileName,
     mimeType,
-    byteCount: input.byteCount,
-    sha256: input.sha256.slice(),
+    byteCount: sizeAtFinish ? null : input.byteCount,
+    sha256: digestless ? null : input.sha256.slice(),
     kind,
     thumbnailFileUniqueId: input.thumbnailFileUniqueId,
   }
@@ -203,7 +223,7 @@ export type NativeUploadOperationsOptions = {
   groupBuffer?: UploadGroupBuffer
   /** Finalizes now when this process holds the upload in memory; see NativeUploadWorker.processNow. */
   finishInline?: (
-    upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
+    upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"]; storageFormat?: string },
     signal?: AbortSignal,
     stored?: Promise<boolean>,
   ) => Promise<"complete" | "running" | "processing">
@@ -218,7 +238,19 @@ export type NativeUploadOperationsOptions = {
   pieces?: UploadPieceAssembler
   /** See EARLY_PART_CREATE_WAIT_MS. */
   earlyPartCreateWaitMs?: number
+  /**
+   * How new uploads are stored. `blocks_v1` holds parts here and writes each block once (see
+   * BLOCKS_STORAGE_FORMAT); `identity_v1` stages every part. Production uses `blocks_v1`; uploads
+   * created before it stay on their format until they finish or expire.
+   */
+  storageFormat?: InlineUploadStorageFormat | (() => InlineUploadStorageFormat)
+  /** Parts of `blocks_v1` uploads held until their block is stored; shared with the worker. */
+  blockBuffer?: UploadBlockBuffer
+  /** Writes the blocks this process holds in full for an upload; see NativeUploadWorker.flush. */
+  flush?: (uploadDbId: number, signal?: AbortSignal) => Promise<void>
 }
+
+
 
 export class NativeUploadOperations {
   readonly #geometry: UploadGeometryCache
@@ -232,6 +264,9 @@ export class NativeUploadOperations {
   readonly #createWaiters = new Map<string, Set<() => void>>()
   readonly #earlyPartCreateWaitMs: number
   readonly #earlyPartWaitsBySession = new Map<number, number>()
+  readonly #storageFormat: () => InlineUploadStorageFormat
+  readonly #blockBuffer: UploadBlockBuffer
+  readonly #flush: NonNullable<NativeUploadOperationsOptions["flush"]>
 
   constructor(
     private readonly repository: InlineUploadRepository,
@@ -249,6 +284,10 @@ export class NativeUploadOperations {
     this.#intake = options.intake
     this.#pieces = options.intake ? options.pieces : undefined
     this.#earlyPartCreateWaitMs = options.earlyPartCreateWaitMs ?? EARLY_PART_CREATE_WAIT_MS
+    const storageFormat = options.storageFormat ?? "identity_v1"
+    this.#storageFormat = typeof storageFormat === "function" ? storageFormat : () => storageFormat
+    this.#blockBuffer = options.blockBuffer ?? new UploadBlockBuffer()
+    this.#flush = options.flush ?? (async () => {})
   }
 
   /** Waits, bounded, for parts acknowledged before their write; call at shutdown. */
@@ -258,8 +297,12 @@ export class NativeUploadOperations {
 
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
     throwIfAborted(context.signal)
-    const metadata = validateCreate(input)
-    if (input.uploadId === undefined) return await this.#create(input, metadata, context)
+    // Only `blocks_v1` takes a create without a digest or size; one that needs it gets it whatever
+    // this process would pick (only a client that saw a `blocks_v1` server sends one).
+    const needsBlocks = input.sha256.length === 0 || input.byteCount === 0n
+    const storageFormat = needsBlocks ? BLOCKS_STORAGE_FORMAT : this.#storageFormat()
+    const metadata = validateCreate(input, storageFormat === BLOCKS_STORAGE_FORMAT)
+    if (input.uploadId === undefined) return await this.#create(input, metadata, context, storageFormat)
     // Registered before the first await, so parts sent right behind this create find it.
     const key = Buffer.from(input.uploadId).toString("hex")
     let settle!: () => void
@@ -268,7 +311,7 @@ export class NativeUploadOperations {
     for (const wake of this.#createWaiters.get(key) ?? []) wake()
     this.#createWaiters.delete(key)
     try {
-      return await this.#create(input, metadata, context)
+      return await this.#create(input, metadata, context, storageFormat)
     } finally {
       settle()
       if (this.#creating.get(key) === created) this.#creating.delete(key)
@@ -314,6 +357,7 @@ export class NativeUploadOperations {
     input: CreateUploadInput,
     metadata: InlineUploadMetadata,
     context: HandlerContext,
+    storageFormat: InlineUploadStorageFormat,
   ): Promise<CreateUploadResult> {
     const owner = await this.#owner(context)
     throwIfAborted(context.signal)
@@ -322,7 +366,7 @@ export class NativeUploadOperations {
       result = await this.repository.create(owner, metadata, {
         maxActiveCount: MAX_ACTIVE_UPLOADS_PER_SESSION,
         maxReservedBytes: MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION,
-      }, input.uploadId)
+      }, input.uploadId, storageFormat)
     } catch (error) {
       if (error instanceof InlineUploadMetadataConflictError) badRequest()
       if (error instanceof InlineUploadAdmissionCapacityError) throw RealtimeRpcError.RateLimit()
@@ -337,7 +381,7 @@ export class NativeUploadOperations {
         uploadDbId: result.upload.id,
         byteCount: result.upload.byteCount,
         partSize: result.upload.partSize,
-        partCount: result.upload.partCount,
+        partCount: result.upload.partCount ?? inlineUploadMaximumPartCount(result.upload.kind as InlineUploadKind),
         hardExpiresAt: result.upload.hardExpiresAt,
         owner,
         storageFormat: result.upload.storageFormat,
@@ -347,10 +391,12 @@ export class NativeUploadOperations {
     const created: CreateUploadResult = {
       uploadId: Uint8Array.from(result.upload.uploadId),
       partSize: result.upload.partSize,
-      partCount: result.upload.partCount,
+      // 0 until the finish names the size.
+      partCount: result.upload.partCount ?? 0,
       expiresAt: BigInt(Math.floor(result.upload.expiresAt.getTime() / 1_000)),
       acceptedParts: this.#withHeldParts(result.upload.id, result.upload.acceptedParts),
       pieceGranularity: this.#pieces && result.upload.status === "uploading" ? UPLOAD_PIECE_GRANULARITY : undefined,
+      sizeAtFinish: result.upload.storageFormat === BLOCKS_STORAGE_FORMAT ? true : undefined,
     }
     return input.inlineData === undefined
       ? created
@@ -405,6 +451,7 @@ export class NativeUploadOperations {
   ): { stored: Promise<boolean>; stop: () => void } | undefined {
     const storeEarly = this.#storeEarly
     if (!storeEarly || !this.#finishInline || upload.status !== "uploading" ||
+        upload.storageFormat === BLOCKS_STORAGE_FORMAT || upload.byteCount === null ||
         upload.byteCount > INLINE_FINISH_MAX_BYTES) return undefined
     const controller = new AbortController()
     const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal
@@ -429,6 +476,7 @@ export class NativeUploadOperations {
     throwIfAborted(context.signal)
     const geometryDoneAt = Date.now()
     if (input.partIndex >= geometry.partCount) return badRequest()
+    if (geometry.storageFormat === BLOCKS_STORAGE_FORMAT) return await this.#holdPart(input, geometry, context)
     const partLength = expectedPartLength(geometry, input.partIndex)
     const traceKey = uploadTraceKey(geometry.uploadDbId)
     const trace = transferTraces.touch(traceKey, "upload", context.inlineProtocol ? "v3" : "v2")
@@ -482,6 +530,70 @@ export class NativeUploadOperations {
     return this.#countStored(trace, data.length, await store(context.signal))
   }
 
+  /**
+   * Holds a `blocks_v1` part here and, once its block is all here, has the worker write the block
+   * (see NativeUploadWorker.#storeBlocks). The reply goes once the bytes are held; bytes lost before
+   * their block is written are reported missing, and the client sends them again.
+   */
+  async #holdPart(
+    input: SaveUploadPartInput,
+    geometry: UploadGeometry,
+    context: HandlerContext,
+  ): Promise<SaveUploadPartResult> {
+    const sizeKnown = geometry.byteCount !== null
+    const partLength = expectedPartLength(geometry, input.partIndex)
+    const trace = transferTraces.touch(uploadTraceKey(geometry.uploadDbId), "upload", context.inlineProtocol ? "v3" : "v2")
+    transferTraces.arrived(trace)
+    const end = this.#blockBuffer.end(geometry.uploadDbId)
+    if (end && input.partIndex > end.partIndex) return badRequest()
+    let data = input.data
+    let streamEnd: { partIndex: number; byteCount: number } | undefined
+    if (input.offset !== undefined) {
+      if (!isValidPiece(partLength, input.offset, input.data.length)) return badRequest()
+      trace.pieces += 1
+    } else if (input.data.length !== partLength) {
+      // Unknown size: the last part is the one shorter than the part size, sent whole.
+      if (sizeKnown || input.data.length < 1 || input.data.length > partLength ||
+          (end && end.partIndex !== input.partIndex) ||
+          this.#blockBuffer.heldParts(geometry.uploadDbId).some((index) => index > input.partIndex)) {
+        return badRequest()
+      }
+      streamEnd = { partIndex: input.partIndex, byteCount: input.data.length }
+    }
+    if (isPartAccepted(geometry, input.partIndex) || this.#blockBuffer.has(geometry.uploadDbId, input.partIndex)) {
+      // Stored, or held here: a resend (its reply was lost, or a block write failed) needs no
+      // second copy, but may retry the block's write.
+      trace.retries += 1
+      this.#wakeBlock(geometry, input.partIndex)
+      return { alreadyPresent: isPartAccepted(geometry, input.partIndex) }
+    }
+    if (input.offset !== undefined && data.length !== partLength) {
+      const whole = this.#pieces?.add(geometry.uploadDbId, input.partIndex, partLength, input.offset, data)
+      if (!whole) return { alreadyPresent: false }
+      data = whole
+    }
+    const sha256 = createHash("sha256").update(data).digest()
+    const held = this.#blockBuffer.hold(geometry.uploadDbId, input.partIndex, { bytes: data, sha256 })
+    // Full: the client backs off and resends; nothing here is evicted to make room.
+    if (held === "full") throw RealtimeRpcError.ServiceUnavailable(RETRY_AFTER_SECONDS)
+    if (streamEnd) this.#blockBuffer.setEnd(geometry.uploadDbId, streamEnd)
+    trace.parts += 1
+    trace.bytes += data.length
+    this.#wakeBlock(geometry, input.partIndex)
+    return { alreadyPresent: false }
+  }
+
+  /** Has the worker write the part's block when this process holds all of it. */
+  #wakeBlock(geometry: UploadGeometry, partIndex: number): void {
+    const block = Math.floor(partIndex / INLINE_UPLOAD_PARTS_PER_BLOCK)
+    const first = block * INLINE_UPLOAD_PARTS_PER_BLOCK
+    // Unknown size: only whole blocks; the last waits for the finish.
+    const count = geometry.byteCount === null
+      ? INLINE_UPLOAD_PARTS_PER_BLOCK
+      : Math.min(INLINE_UPLOAD_PARTS_PER_BLOCK, geometry.partCount - first)
+    if (this.#blockBuffer.peek(geometry.uploadDbId, first, count)) this.#wake(geometry.uploadDbId, block + 1)
+  }
+
   #countStored(
     trace: ReturnType<typeof transferTraces.touch>,
     byteCount: number,
@@ -497,7 +609,7 @@ export class NativeUploadOperations {
 
   /** Accepted parts plus the ones this process holds for storage behind an acknowledgement. */
   #withHeldParts(uploadDbId: number, acceptedParts: number[]): number[] {
-    const held = this.#intake?.pendingParts(uploadDbId) ?? []
+    const held = [...this.#intake?.pendingParts(uploadDbId) ?? [], ...this.#blockBuffer.heldParts(uploadDbId)]
     if (held.length === 0) return acceptedParts
     return [...new Set([...acceptedParts, ...held])].sort((left, right) => left - right)
   }
@@ -642,7 +754,7 @@ export class NativeUploadOperations {
       uploadDbId: upload.id,
       byteCount: upload.byteCount,
       partSize: upload.partSize,
-      partCount: upload.partCount,
+      partCount: upload.partCount ?? inlineUploadMaximumPartCount(await this.#kindOf(uploadId, owner)),
       hardExpiresAt: upload.hardExpiresAt,
       owner,
       storageFormat: upload.storageFormat,
@@ -704,21 +816,32 @@ export class NativeUploadOperations {
     }
     const thumbnail = input.thumbnailFileUniqueId
     if (thumbnail !== undefined && (thumbnail.length < 1 || thumbnail.length > 128)) return badRequest()
-    const result = await this.repository.requestFinish(input.uploadId, owner, thumbnail)
+    const blocks = await this.#prepareBlocksFinish(input, owner, context)
+    const result = await this.repository.requestFinish(input.uploadId, owner, thumbnail, blocks?.held)
     if (result.kind !== "missing") {
       this.#geometry.drop(input.uploadId)
       if (cached && cached !== "owner_mismatch") this.#pieces?.drop(cached.uploadDbId)
+      if (blocks) this.#pieces?.drop(blocks.uploadDbId)
     }
     switch (result.kind) {
       case "rejected": return badRequest()
       case "missing":
         return { state: { oneofKind: "missing", missing: { partIndices: result.partIndices } } }
+      case "pending":
+        // Every part is here but a block is not stored yet (its write failed, or another process
+        // still holds the upload's claim): finish again shortly.
+        return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
       case "processing":
         return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
       case "queued": {
         const inline = result.byteCount <= INLINE_FINISH_MAX_BYTES && this.#finishInline
           ? await this.#finishInline(
-            { id: result.uploadDbId, partCount: result.partCount, kind: result.uploadKind },
+            {
+              id: result.uploadDbId,
+              partCount: result.partCount,
+              kind: result.uploadKind,
+              storageFormat: blocks ? BLOCKS_STORAGE_FORMAT : undefined,
+            },
             context.signal,
             stored,
           ).catch((error) => {
@@ -761,11 +884,76 @@ export class NativeUploadOperations {
       }
     }
   }
+  /**
+   * Before a `blocks_v1` upload's finish reads what is stored: names the size the create left
+   * out, then writes every block this process holds in full. Returns the parts still held here
+   * (in blocks that cannot be written yet), which the finish does not report missing.
+   */
+  async #prepareBlocksFinish(
+    input: FinishUploadInput,
+    owner: InlineUploadOwner,
+    context: HandlerContext,
+  ): Promise<{ uploadDbId: number; held: Set<number> } | undefined> {
+    const upload = await this.repository.get(input.uploadId, owner)
+    if (!upload || upload.storageFormat !== BLOCKS_STORAGE_FORMAT) {
+      if (input.byteCount !== undefined && upload?.byteCount !== input.byteCount) return badRequest()
+      return undefined
+    }
+    if (upload.status !== "uploading") {
+      if (input.byteCount !== undefined && upload.byteCount !== input.byteCount) return badRequest()
+      return { uploadDbId: upload.id, held: new Set() }
+    }
+    if (upload.byteCount !== null) {
+      // Named at create or by an earlier finish; the parts since were checked against it.
+      if (input.byteCount !== undefined && input.byteCount !== upload.byteCount) return badRequest()
+    } else {
+      const byteCount = input.byteCount ?? badRequest()
+      const kind = upload.kind as InlineUploadKind
+      if (byteCount <= 0n || byteCount > inlineUploadMaximumByteCount(kind)) return badRequest()
+      const partCount = Number((byteCount + BigInt(upload.partSize - 1)) / BigInt(upload.partSize))
+      const lastLength = Number(byteCount - BigInt(upload.partSize) * BigInt(partCount - 1))
+      // Whatever arrived while the size was unknown must fit it: nothing past the last part, and a
+      // short part only as the last one, with the length the size implies.
+      const end = this.#blockBuffer.end(upload.id)
+      const held = this.#blockBuffer.heldParts(upload.id)
+      if ((end && (end.partIndex !== partCount - 1 || end.byteCount !== lastLength)) ||
+          held.some((index) => index >= partCount) ||
+          upload.acceptedParts.some((index) => index >= partCount) ||
+          (lastLength !== upload.partSize && !end && (this.#blockBuffer.has(upload.id, partCount - 1) ||
+            upload.acceptedParts.includes(partCount - 1)))) {
+        return badRequest()
+      }
+      if (!await this.repository.setSize(upload.id, byteCount, partCount)) return badRequest()
+      this.#blockBuffer.clearEnd(upload.id)
+      this.#geometry.put({
+        uploadId: input.uploadId,
+        uploadDbId: upload.id,
+        byteCount,
+        partSize: upload.partSize,
+        partCount,
+        hardExpiresAt: upload.hardExpiresAt,
+        owner,
+        storageFormat: upload.storageFormat,
+        acceptedParts: upload.acceptedParts,
+      })
+    }
+    throwIfAborted(context.signal)
+    await this.#flush(upload.id, context.signal)
+    throwIfAborted(context.signal)
+    return { uploadDbId: upload.id, held: new Set(this.#blockBuffer.heldParts(upload.id)) }
+  }
+
+  async #kindOf(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<InlineUploadKind> {
+    const upload = requireValue(await this.repository.get(uploadId, owner))
+    return upload.kind as InlineUploadKind
+  }
+
   async cancel(input: CancelUploadInput, context: HandlerContext): Promise<CancelUploadResult> {
     const owner = await this.#owner(context)
     const canceled = requireValue(await this.repository.cancel(input.uploadId, owner))
     this.#geometry.drop(input.uploadId)
     this.#groupBuffer?.drop(canceled.upload.id)
+    this.#blockBuffer.drop(canceled.upload.id)
     this.#pieces?.drop(canceled.upload.id)
     if (canceled.result.canceled) {
       transferTraces.finish(uploadTraceKey(canceled.upload.id), "canceled")
@@ -836,7 +1024,7 @@ export const nativeUploadWorker = new NativeUploadWorker(
   partStore,
   multipartStore,
   finalizer,
-  { groupBuffer: uploadGroupBuffer },
+  { groupBuffer: uploadGroupBuffer, blockBuffer: uploadBlockBuffer },
 )
 
 export class NativeUploadWorkerAlreadyOwnedError extends Error {
@@ -894,5 +1082,8 @@ export const nativeUploadOperations = new NativeUploadOperations(
     storeEarly: (upload, bytes, signal) => nativeUploadWorker.storeEarly(upload, bytes, signal),
     intake: new UploadPartIntake({ isStorageOutage: isPartStorageOutage }),
     pieces: new UploadPieceAssembler(),
+    storageFormat: () => process.uptime() * 1_000 >= BLOCKS_CREATE_AFTER_UPTIME_MS ? BLOCKS_STORAGE_FORMAT : "identity_v1",
+    blockBuffer: uploadBlockBuffer,
+    flush: (uploadDbId, signal) => nativeUploadWorker.flush(uploadDbId, signal),
   },
 )

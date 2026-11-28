@@ -1,8 +1,14 @@
 import { createHash, type Hash } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import {
+  BLOCKS_STORAGE_FORMAT,
+  INLINE_UPLOAD_PARTS_PER_BLOCK,
   INLINE_UPLOAD_PROCESSING_LEASE_MS,
+  WHOLE_OBJECT_STORAGE_UPLOAD_ID,
   InlineUploadPublicationConflictError,
+  inlineUploadMaximumPartCount,
+  storedBlockParts,
+  type InlineUploadKind,
   InlineUploadRepository,
   inlineUploadPublicationPath,
   type InlineUploadProcessingClaim,
@@ -20,6 +26,7 @@ import {
   type MediaUploadFinalizer,
 } from "./finalizer"
 import { UploadGroupBuffer } from "./groupBuffer"
+import { UploadBlockBuffer } from "./blockBuffer"
 import {
   MultipartIntegrityError,
   MultipartStorageUnavailableError,
@@ -35,7 +42,7 @@ import { transferTraces, withTransferCounters } from "@in/server/modules/transfe
 export const uploadTraceKey = (uploadDbId: number): string => `upload:${uploadDbId}`
 
 const log = new Log("modules/uploads/worker")
-export const STORAGE_FRAMES_PER_PART = 10
+export const STORAGE_FRAMES_PER_PART = INLINE_UPLOAD_PARTS_PER_BLOCK
 const DEFAULT_CONCURRENCY = 4
 const DEFAULT_POLL_INTERVAL_MS = 2_000
 const MAX_PROCESSING_ATTEMPTS = 12
@@ -60,11 +67,18 @@ const MAX_RUNNING_DIGESTS = 256
 // group to the finish pass.
 const GROUP_CLAIM_RETRIES = 3
 const GROUP_CLAIM_RETRY_DELAY_MS = 100
+// A finish's flush waits this long, in total, for a block write that holds the claim.
+const FLUSH_CLAIM_ATTEMPTS = 8
+const FLUSH_CLAIM_RETRY_DELAY_MS = 50
+// A block write runs one provider call per block; a finish waits for one this long at most.
+const TASK_SETTLE_TIMEOUT_MS = 10_000
 
 type WorkerOptions = {
   concurrency?: number
   /** Accepted frames this process still holds; shared with the operations that fill it. */
   groupBuffer?: UploadGroupBuffer
+  /** Parts of `blocks_v1` uploads held until their block is stored; shared with the operations. */
+  blockBuffer?: UploadBlockBuffer
   inlineFinishTimeoutMs?: number
   expiryCleanupIntervalMs?: number
   leaseRenewTimeoutMs?: number
@@ -167,6 +181,17 @@ const mapConcurrent = async <T>(
   throwIfAborted(parentSignal)
 }
 
+/** Older formats always name their size at create. */
+const legacyPartCount = (upload: { partCount: number | null }): number => {
+  if (upload.partCount === null) throw new UploadIntegrityError()
+  return upload.partCount
+}
+
+const legacyDigest = (upload: { sha256: Uint8Array | null }): Uint8Array => {
+  if (!upload.sha256) throw new UploadIntegrityError()
+  return upload.sha256
+}
+
 const storageKeyFor = (upload: InlineUploadRecord): string => {
   if (!upload.resultFileUniqueId) throw new UploadIntegrityError()
   return `${FILES_PATH_PREFIX}/${inlineUploadPublicationPath(upload.resultFileUniqueId)}`
@@ -190,11 +215,14 @@ export class NativeUploadWorker {
   readonly #random: () => number
   readonly #backoff: IdleBackoff
   readonly #groupBuffer: UploadGroupBuffer
+  readonly #blockBuffer: UploadBlockBuffer
   readonly #inlineFinishTimeoutMs: number
   readonly #digests = new Map<number, RunningDigest>()
   /** Queued uploads; a group set means only those complete storage groups, `full` a whole pass. */
   readonly #queued = new Map<number, Set<number> | "full">()
   readonly #activeUploads = new Set<number>()
+  /** The running task of each active upload, so a finish can wait for a block write to end. */
+  readonly #uploadTasks = new Map<number, Promise<void>>()
   readonly #claimControllers = new Map<number, AbortController>()
   /** When each claim was requested; the database starts its lease no earlier. */
   readonly #claimRequestedAt = new WeakMap<InlineUploadProcessingClaim, number>()
@@ -225,6 +253,7 @@ export class NativeUploadWorker {
     this.#shutdownDrainTimeoutMs = options.shutdownDrainTimeoutMs ?? DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS
     this.#random = options.random ?? Math.random
     this.#groupBuffer = options.groupBuffer ?? new UploadGroupBuffer()
+    this.#blockBuffer = options.blockBuffer ?? new UploadBlockBuffer()
     this.#inlineFinishTimeoutMs = options.inlineFinishTimeoutMs ?? DEFAULT_INLINE_FINISH_TIMEOUT_MS
     if (!Number.isSafeInteger(this.#concurrency) || this.#concurrency < 1) throw new RangeError("Invalid worker concurrency")
     if (!Number.isSafeInteger(this.#pollIntervalMs) || this.#pollIntervalMs < 10 ||
@@ -347,10 +376,12 @@ export class NativeUploadWorker {
    * it resolves true the final object is not written again.
    */
   async processNow(
-    upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
+    upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"]; storageFormat?: string | null },
     signal?: AbortSignal,
     stored?: Promise<boolean>,
   ): Promise<"complete" | "running" | "processing"> {
+    // A `blocks_v1` block write the last part started may still hold the upload; it ends shortly.
+    if (upload.storageFormat === BLOCKS_STORAGE_FORMAT) await this.#settleTask(upload.id, signal)
     if (!this.#started || this.#activeUploads.has(upload.id) || !this.#holdsInMemory(upload)) return "processing"
     const claim = await this.#claim(() => this.repository.claimProcessing(upload.id))
     if (!claim) return "processing"
@@ -393,7 +424,8 @@ export class NativeUploadWorker {
     // Only `processNow` here can use the write, and it needs a running worker.
     if (!this.#started || Date.now() >= latestStart || !this.multipartStore.put || upload.status !== "uploading" ||
         upload.storageFormat !== IDENTITY_STORAGE_FORMAT || upload.storageUploadId ||
-        upload.partCount > STORAGE_FRAMES_PER_PART || BigInt(bytes.byteLength) !== upload.byteCount ||
+        upload.partCount === null || upload.partCount > STORAGE_FRAMES_PER_PART ||
+        BigInt(bytes.byteLength) !== upload.byteCount || !upload.sha256 ||
         !sameBytes(createHash("sha256").update(bytes).digest(), upload.sha256)) return false
     try {
       await this.multipartStore.put({
@@ -420,7 +452,14 @@ export class NativeUploadWorker {
   }
 
   /** Every group is either already in the running digest or fully buffered; photos need every frame. */
-  #holdsInMemory(upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] }): boolean {
+  #holdsInMemory(upload: {
+    id: number
+    partCount: number
+    kind: InlineUploadRecord["kind"]
+    storageFormat?: string | null
+  }): boolean {
+    // A `blocks_v1` upload is processing only once all its bytes are stored.
+    if (upload.storageFormat === BLOCKS_STORAGE_FORMAT) return true
     if (bufferedPublicationNeedsBytes(upload.kind)) {
       return this.#groupBuffer.hasAll(upload.id, 0, upload.partCount)
     }
@@ -433,6 +472,7 @@ export class NativeUploadWorker {
 
   #forgetUpload(uploadDbId: number): void {
     this.#groupBuffer.drop(uploadDbId)
+    this.#blockBuffer.drop(uploadDbId)
     this.#digests.delete(uploadDbId)
   }
 
@@ -478,14 +518,16 @@ export class NativeUploadWorker {
     // open trace for the upload, when it received the parts.
     const trace = transferTraces.get(uploadTraceKey(uploadDbId))
     const task = trace ? withTransferCounters(trace.counters, run) : run()
-    const observed = task.catch((error) => {
+    const observed: Promise<void> = task.catch((error) => {
       if (!this.#abort.signal.aborted) log.error("Native upload worker task failed", { error })
     }).finally(() => {
       this.#active -= 1
       this.#activeUploads.delete(uploadDbId)
+      if (this.#uploadTasks.get(uploadDbId) === observed) this.#uploadTasks.delete(uploadDbId)
       this.#tasks.delete(observed)
       this.#pump()
     })
+    this.#uploadTasks.set(uploadDbId, observed)
     this.#tasks.add(observed)
     return observed
   }
@@ -745,10 +787,13 @@ export class NativeUploadWorker {
       if (claim.upload.thumbnailFileUniqueId && !thumbnailPhotoId) throw new UploadInvalidMediaError()
 
       let publication
-      const singleGroupFrames = claim.upload.storageFormat
+      const blocks = claim.upload.storageFormat === BLOCKS_STORAGE_FORMAT
+      const singleGroupFrames = claim.upload.storageFormat && !blocks
         ? await this.#singleGroupFrames(claim, controller.signal)
         : undefined
-      if (!claim.upload.storageFormat) {
+      if (blocks) {
+        publication = await this.#prepareBlocks(claim, thumbnailPhotoId, assertOwnership, controller.signal)
+      } else if (!claim.upload.storageFormat) {
         publication = await this.finalizer.preparePublication({
           upload: claim.upload,
           parts: claim.parts,
@@ -818,7 +863,7 @@ export class NativeUploadWorker {
         uploadDbId: claim.upload.id,
         kind: claim.upload.kind,
         logicalPartCount: claim.parts.length,
-        storagePartCount: Math.ceil(claim.upload.partCount / STORAGE_FRAMES_PER_PART),
+        storagePartCount: Math.ceil((claim.upload.partCount ?? 0) / STORAGE_FRAMES_PER_PART),
         attempt: claim.upload.attempts + 1,
         elapsedMs: Date.now() - startedAt,
       })
@@ -932,14 +977,18 @@ export class NativeUploadWorker {
     onlyGroups?: readonly number[],
   ): Promise<InlineUploadStorageWork> {
     throwIfAborted(signal)
+    if (initialWork.upload.storageFormat === BLOCKS_STORAGE_FORMAT) {
+      return await this.#storeBlocks(initialWork, signal, lockToken, onlyGroups)
+    }
+    const partCount = legacyPartCount(initialWork.upload)
     // A single-group upload is stored by finish with one PUT; a session opened early would force multipart.
-    if (!includeTail && initialWork.upload.partCount <= STORAGE_FRAMES_PER_PART) return initialWork
+    if (!includeTail && partCount <= STORAGE_FRAMES_PER_PART) return initialWork
     const codec = storageCodecFor(initialWork.upload.storageFormat)
     if (!codec) throw new UploadIntegrityError()
     const sourceByIndex = new Map(initialWork.parts.map((part) => [part.partIndex, part]))
     const readyGroups: number[] = []
     const selectedGroups = onlyGroups ? new Set(onlyGroups) : undefined
-    for (const geometry of storagePartGeometry(initialWork.upload.partCount)) {
+    for (const geometry of storagePartGeometry(partCount)) {
       if (!includeTail && geometry.frameCount < STORAGE_FRAMES_PER_PART) continue
       if (selectedGroups && !selectedGroups.has(geometry.partNumber)) continue
       if (Array.from({ length: geometry.frameCount }, (_, offset) =>
@@ -949,6 +998,91 @@ export class NativeUploadWorker {
     }
     if (readyGroups.length === 0) return initialWork
 
+    const key = storageKeyFor(initialWork.upload)
+    const storageUploadId = await this.#storageSession(initialWork, signal, lockToken)
+
+    const existing = new Map(initialWork.storageParts
+      .filter((part) => part.storageUploadId === storageUploadId)
+      .map((part) => [part.partNumber, part]))
+    const digest = this.#digestFor(initialWork.upload)
+    if (digest && !digest.incomplete) {
+      // Groups recorded without this process hashing them can never join the digest.
+      for (const partNumber of existing.keys()) {
+        if (partNumber >= digest.nextGroup && !digest.pending.has(partNumber)) {
+          digest.incomplete = true
+          digest.pending.clear()
+          break
+        }
+      }
+    }
+    // Photos keep their frames buffered for content validation at publication.
+    const retainFrames = bufferedPublicationNeedsBytes(initialWork.upload.kind)
+    const missing = readyGroups.filter((partNumber) => !existing.has(partNumber))
+    await mapConcurrent(missing, this.#concurrency, async (partNumber, groupSignal) => {
+      throwIfAborted(groupSignal)
+      const start = (partNumber - 1) * STORAGE_FRAMES_PER_PART
+      const end = Math.min(start + STORAGE_FRAMES_PER_PART, partCount)
+      const frames = Array.from({ length: end - start }, (_, offset) => sourceByIndex.get(start + offset)!)
+      const buffered = retainFrames
+        ? this.#groupBuffer.peekGroup(initialWork.upload.id, start, frames.length)
+        : this.#groupBuffer.takeGroup(initialWork.upload.id, start, frames.length)
+      const chunks: Uint8Array[] = buffered ?? Array.from({ length: frames.length })
+      if (buffered) {
+        frames.forEach((part, index) => {
+          const bytes = buffered[index]!
+          if (bytes.byteLength !== part.storedByteCount ||
+              !sameBytes(createHash("sha256").update(bytes).digest(), part.storedSha256)) {
+            throw new UploadIntegrityError()
+          }
+        })
+      } else await mapConcurrent(frames.map((part, index) => ({ part, index })), STAGING_READ_CONCURRENCY, async ({ part, index }, readSignal) => {
+        const bytes = await this.partStore.read(part.objectKey, part.storedByteCount, readSignal)
+          .catch((error) => {
+            if (error instanceof FileByteLengthError) throw new UploadIntegrityError()
+            throw error
+          })
+        if (bytes.byteLength !== part.storedByteCount ||
+            !sameBytes(createHash("sha256").update(bytes).digest(), part.storedSha256)) {
+          throw new UploadIntegrityError()
+        }
+        chunks[index] = bytes
+      }, groupSignal)
+      const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
+      const storedSha256 = createHash("sha256").update(bytes).digest()
+      const uploaded = await this.multipartStore.uploadPart({
+        key,
+        uploadId: storageUploadId,
+        partNumber,
+        bytes,
+        signal: groupSignal,
+      })
+      const recorded = await this.repository.recordStoragePart({
+        uploadDbId: initialWork.upload.id,
+        storageUploadId,
+        partNumber,
+        storedByteCount: bytes.byteLength,
+        storedSha256,
+        etag: uploaded.etag,
+        lockToken,
+      })
+      if (recorded === "stale") throw new UploadOwnershipLostError()
+      this.#feedDigest(initialWork.upload, partNumber, bytes)
+    }, signal)
+
+    // A group pass only needed its own groups recorded; recordStoragePart fenced ownership.
+    if (onlyGroups) return initialWork
+    const refreshed = await this.repository.getStorageWork(initialWork.upload.id)
+    if (!refreshed || refreshed.upload.storageUploadId !== storageUploadId) throw new UploadOwnershipLostError()
+    return refreshed
+  }
+
+  /** The upload's multipart session, created and installed when it has none. */
+  async #storageSession(
+    work: InlineUploadStorageWork,
+    signal: AbortSignal,
+    lockToken: Uint8Array | undefined,
+  ): Promise<string> {
+    const initialWork = work
     let storageUploadId: string | undefined = initialWork.upload.storageUploadId ?? undefined
     const key = storageKeyFor(initialWork.upload)
     if (!storageUploadId) {
@@ -983,80 +1117,182 @@ export class NativeUploadWorker {
       storageUploadId = installed.storageUploadId
       if (!storageUploadId) throw new UploadOwnershipLostError()
     }
+    return storageUploadId
+  }
 
-    const existing = new Map(initialWork.storageParts
-      .filter((part) => part.storageUploadId === storageUploadId)
-      .map((part) => [part.partNumber, part]))
-    const digest = this.#digestFor(initialWork.upload)
-    if (digest && !digest.incomplete) {
-      // Groups recorded without this process hashing them can never join the digest.
-      for (const partNumber of existing.keys()) {
-        if (partNumber >= digest.nextGroup && !digest.pending.has(partNumber)) {
-          digest.incomplete = true
-          digest.pending.clear()
-          break
-        }
-      }
+  /**
+   * Writes the `blocks_v1` blocks this process holds in full, each once, straight into the final
+   * object. A file of one block, size known, is one PutObject at its final key; any other block is
+   * a part of the object's multipart session. A block whose parts are not all held here (another
+   * machine got some, or they were dropped) waits: the finish reports those parts missing and the
+   * client resends them. Until the size is known, only whole blocks are written.
+   */
+  async #storeBlocks(
+    work: InlineUploadStorageWork,
+    signal: AbortSignal,
+    lockToken: Uint8Array | undefined,
+    onlyGroups?: readonly number[],
+  ): Promise<InlineUploadStorageWork> {
+    const upload = work.upload
+    const known = upload.partCount !== null && upload.byteCount !== null
+    const partLimit = upload.partCount ?? inlineUploadMaximumPartCount(upload.kind as InlineUploadKind)
+    const stored = new Set(upload.acceptedParts)
+    const selected = onlyGroups ? new Set(onlyGroups) : undefined
+    const ready: { partNumber: number; first: number; count: number }[] = []
+    for (const group of storagePartGeometry(partLimit)) {
+      if (selected && !selected.has(group.partNumber)) continue
+      // Unknown size: a short group may be the file's last; it waits for the size.
+      if (!known && group.frameCount < STORAGE_FRAMES_PER_PART) continue
+      if (stored.has(group.firstFrameIndex)) continue
+      const held = this.#blockBuffer.peek(upload.id, group.firstFrameIndex, group.frameCount)
+      if (!held) continue
+      // Unknown size: a whole group may still end with the short last part, which the size proves.
+      if (!known && held.some((part) => part.bytes.byteLength !== upload.partSize)) continue
+      ready.push({ partNumber: group.partNumber, first: group.firstFrameIndex, count: group.frameCount })
     }
-    // Photos keep their frames buffered for content validation at publication.
-    const retainFrames = bufferedPublicationNeedsBytes(initialWork.upload.kind)
-    const missing = readyGroups.filter((partNumber) => !existing.has(partNumber))
-    await mapConcurrent(missing, this.#concurrency, async (partNumber, groupSignal) => {
-      throwIfAborted(groupSignal)
-      const start = (partNumber - 1) * STORAGE_FRAMES_PER_PART
-      const end = Math.min(start + STORAGE_FRAMES_PER_PART, initialWork.upload.partCount)
-      const frames = Array.from({ length: end - start }, (_, offset) => sourceByIndex.get(start + offset)!)
-      const buffered = retainFrames
-        ? this.#groupBuffer.peekGroup(initialWork.upload.id, start, frames.length)
-        : this.#groupBuffer.takeGroup(initialWork.upload.id, start, frames.length)
-      const chunks: Uint8Array[] = buffered ?? Array.from({ length: frames.length })
-      if (buffered) {
-        frames.forEach((part, index) => {
-          const bytes = buffered[index]!
-          if (bytes.byteLength !== part.storedByteCount ||
-              !sameBytes(createHash("sha256").update(bytes).digest(), part.storedSha256)) {
-            throw new UploadIntegrityError()
-          }
-        })
-      } else await mapConcurrent(frames.map((part, index) => ({ part, index })), STAGING_READ_CONCURRENCY, async ({ part, index }, readSignal) => {
-        const bytes = await this.partStore.read(part.objectKey, part.storedByteCount, readSignal)
-          .catch((error) => {
-            if (error instanceof FileByteLengthError) throw new UploadIntegrityError()
-            throw error
-          })
-        if (bytes.byteLength !== part.storedByteCount ||
-            !sameBytes(createHash("sha256").update(bytes).digest(), part.storedSha256)) {
-          throw new UploadIntegrityError()
-        }
-        chunks[index] = bytes
-      }, groupSignal)
-      const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
-      const storedSha256 = createHash("sha256").update(bytes).digest()
+    if (ready.length === 0) return work
+    // A one-block photo keeps its bytes for content validation at publication; a larger one is
+    // read back then, so its blocks don't count against the upload's hold in the buffer.
+    const retain = bufferedPublicationNeedsBytes(upload.kind) && known && upload.partCount! <= STORAGE_FRAMES_PER_PART
+    const key = storageKeyFor(upload)
+    const wholeObject = known && upload.partCount! <= STORAGE_FRAMES_PER_PART && !upload.storageUploadId &&
+      work.storageParts.length === 0 && this.multipartStore.put !== undefined
+    if (wholeObject) {
+      const block = ready[0]!
+      const held = this.#blockBuffer.peek(upload.id, block.first, block.count)!
+      const bytes = Buffer.concat(held.map((part) => Buffer.from(part.bytes)))
+      if (BigInt(bytes.byteLength) !== upload.byteCount) throw new UploadIntegrityError()
+      const put = await this.multipartStore.put!({ key, bytes, contentType: upload.mimeType, signal })
+      const recorded = await this.repository.recordStoragePart({
+        uploadDbId: upload.id,
+        storageUploadId: WHOLE_OBJECT_STORAGE_UPLOAD_ID,
+        partNumber: 1,
+        storedByteCount: bytes.byteLength,
+        storedSha256: createHash("sha256").update(bytes).digest(),
+        partHashes: Buffer.concat(held.map((part) => Buffer.from(part.sha256))),
+        etag: put.etag,
+        lockToken,
+      })
+      if (recorded === "stale") throw new UploadOwnershipLostError()
+      if (!retain) this.#blockBuffer.release(upload.id, block.first, block.count)
+      return work
+    }
+    const storageUploadId = await this.#storageSession(work, signal, lockToken)
+    await mapConcurrent(ready, this.#concurrency, async (block, blockSignal) => {
+      throwIfAborted(blockSignal)
+      const held = this.#blockBuffer.peek(upload.id, block.first, block.count)
+      if (!held) return
+      const bytes = Buffer.concat(held.map((part) => Buffer.from(part.bytes)))
       const uploaded = await this.multipartStore.uploadPart({
         key,
-        uploadId: storageUploadId!,
-        partNumber,
+        uploadId: storageUploadId,
+        partNumber: block.partNumber,
         bytes,
-        signal: groupSignal,
+        signal: blockSignal,
       })
       const recorded = await this.repository.recordStoragePart({
-        uploadDbId: initialWork.upload.id,
-        storageUploadId: storageUploadId!,
-        partNumber,
+        uploadDbId: upload.id,
+        storageUploadId,
+        partNumber: block.partNumber,
         storedByteCount: bytes.byteLength,
-        storedSha256,
+        storedSha256: createHash("sha256").update(bytes).digest(),
+        partHashes: Buffer.concat(held.map((part) => Buffer.from(part.sha256))),
         etag: uploaded.etag,
         lockToken,
       })
       if (recorded === "stale") throw new UploadOwnershipLostError()
-      this.#feedDigest(initialWork.upload, partNumber, bytes)
+      if (!retain) this.#blockBuffer.release(upload.id, block.first, block.count)
     }, signal)
+    return work
+  }
 
-    // A group pass only needed its own groups recorded; recordStoragePart fenced ownership.
-    if (onlyGroups) return initialWork
-    const refreshed = await this.repository.getStorageWork(initialWork.upload.id)
-    if (!refreshed || refreshed.upload.storageUploadId !== storageUploadId) throw new UploadOwnershipLostError()
-    return refreshed
+  /**
+   * Writes every block of a `blocks_v1` upload this process holds in full, for a finish that is
+   * about to check whether all bytes are stored. Takes the upload's compaction claim, waiting
+   * briefly for a block write already running here or on another machine.
+   */
+  async flush(uploadDbId: number, signal?: AbortSignal): Promise<void> {
+    for (let attempt = 0; attempt < FLUSH_CLAIM_ATTEMPTS; attempt++) {
+      if (signal?.aborted || !this.#started) return
+      await this.#settleTask(uploadDbId, signal)
+      const claim = await this.#claim(() => this.repository.claimUploadingCompaction(uploadDbId))
+      if (claim) {
+        if (claim.upload.storageFormat !== BLOCKS_STORAGE_FORMAT) {
+          await this.repository.releaseProcessingClaim({ uploadDbId, lockToken: claim.lockToken }).catch(() => false)
+          return
+        }
+        await this.#processUploadingClaim(claim)
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, FLUSH_CLAIM_RETRY_DELAY_MS * (attempt + 1)))
+    }
+  }
+
+  /** Waits, bounded, for this process's running task of the upload. */
+  async #settleTask(uploadDbId: number, signal?: AbortSignal): Promise<void> {
+    const task = this.#uploadTasks.get(uploadDbId)
+    if (!task) return
+    await Promise.race([
+      task,
+      Bun.sleep(TASK_SETTLE_TIMEOUT_MS),
+      ...(signal ? [new Promise<void>((resolve) => {
+        if (signal.aborted) resolve()
+        signal.addEventListener("abort", () => resolve(), { once: true })
+      })] : []),
+    ])
+  }
+
+  /**
+   * Proves a `blocks_v1` upload's object is complete (its blocks cover every part and the stored
+   * object is exactly those blocks), then prepares its publication. The bytes were hashed per part
+   * at receipt and the transport checked each message, so the object is read back only for photos
+   * whose bytes this process no longer holds.
+   */
+  async #prepareBlocks(
+    work: InlineUploadStorageWork,
+    thumbnailPhotoId: number | undefined,
+    assertOwnership: () => Promise<void>,
+    signal: AbortSignal,
+  ) {
+    const upload = work.upload
+    if (upload.partCount === null || upload.byteCount === null) throw new UploadIntegrityError()
+    const covered = storedBlockParts(upload, work.storageParts)
+    if (covered.length !== upload.partCount || covered.some((part, index) => part !== index)) {
+      throw new UploadIntegrityError()
+    }
+    const whole = work.storageParts.find((part) => part.storageUploadId === WHOLE_OBJECT_STORAGE_UPLOAD_ID)
+    if (whole) {
+      await assertOwnership()
+      const head = await this.multipartStore.head(storageKeyFor(upload), signal)
+      if (!head || BigInt(head.byteCount) !== upload.byteCount || head.etag !== whole.etag) {
+        throw new MultipartIntegrityError()
+      }
+    } else {
+      const session = work.storageParts.filter((part) => part.storageUploadId === upload.storageUploadId)
+      if (BigInt(session.reduce((total, part) => total + part.storedByteCount, 0)) !== upload.byteCount) {
+        throw new UploadIntegrityError()
+      }
+      await this.#completeStorage({ ...work, storageParts: session }, signal, assertOwnership)
+    }
+    const needsBytes = bufferedPublicationNeedsBytes(upload.kind)
+    const held = needsBytes ? this.#blockBuffer.peek(upload.id, 0, upload.partCount) : undefined
+    if (!needsBytes || held) {
+      return await this.finalizer.prepareBufferedPublication({
+        upload,
+        frames: held?.map((part) => part.bytes),
+        thumbnailPhotoId,
+        assertOwnership,
+        signal,
+      })
+    }
+    await assertOwnership()
+    return await this.finalizer.prepareStoredPublication({
+      upload,
+      stream: await this.multipartStore.stream(storageKeyFor(upload), signal),
+      thumbnailPhotoId,
+      assertOwnership,
+      signal,
+    })
   }
 
   /**
@@ -1073,13 +1309,13 @@ export class NativeUploadWorker {
   ): Promise<{ frames: Uint8Array[]; bytes: Uint8Array } | undefined> {
     const upload = work.upload
     if (!this.multipartStore.put || upload.storageFormat !== IDENTITY_STORAGE_FORMAT ||
-        upload.partCount > STORAGE_FRAMES_PER_PART || upload.storageUploadId ||
+        legacyPartCount(upload) > STORAGE_FRAMES_PER_PART || upload.storageUploadId ||
         work.storageParts.length > 0) return undefined
     const frames = await this.#readFrames(work, signal)
     if (!frames) return undefined
     const bytes = Buffer.concat(frames)
     if (bytes.byteLength !== Number(upload.byteCount) ||
-        !sameBytes(createHash("sha256").update(bytes).digest(), upload.sha256)) {
+        !sameBytes(createHash("sha256").update(bytes).digest(), legacyDigest(upload))) {
       throw new UploadIntegrityError()
     }
     return { frames, bytes }
@@ -1112,7 +1348,8 @@ export class NativeUploadWorker {
   async #readFrames(work: InlineUploadStorageWork, signal: AbortSignal): Promise<Uint8Array[] | undefined> {
     const upload = work.upload
     const parts = [...work.parts].sort((left, right) => left.partIndex - right.partIndex)
-    if (parts.length !== upload.partCount || parts.some((part, index) => part.partIndex !== index)) return undefined
+    if (parts.length !== legacyPartCount(upload) ||
+        parts.some((part, index) => part.partIndex !== index)) return undefined
     const buffered = this.#groupBuffer.peekGroup(upload.id, 0, parts.length)
     const frames: Uint8Array[] = buffered ?? Array.from({ length: parts.length })
     if (!buffered) {
@@ -1144,7 +1381,7 @@ export class NativeUploadWorker {
     const key = storageKeyFor(work.upload)
     const storageUploadId = work.upload.storageUploadId
     if (!storageUploadId) throw new UploadIntegrityError()
-    const expectedCount = Math.ceil(work.upload.partCount / STORAGE_FRAMES_PER_PART)
+    const expectedCount = Math.ceil(legacyPartCount(work.upload) / STORAGE_FRAMES_PER_PART)
     if (work.storageParts.length !== expectedCount ||
         work.storageParts.some((part, index) => part.partNumber !== index + 1 ||
           part.storageUploadId !== storageUploadId)) throw new UploadIntegrityError()
@@ -1182,12 +1419,13 @@ export class NativeUploadWorker {
   ) {
     const upload = work.upload
     const digest = this.#digests.get(upload.id)
-    const groupCount = Math.ceil(upload.partCount / STORAGE_FRAMES_PER_PART)
+    const partCount = legacyPartCount(upload)
+    const groupCount = Math.ceil(partCount / STORAGE_FRAMES_PER_PART)
     if (digest && !digest.incomplete && digest.nextGroup === groupCount + 1) {
       this.#digests.delete(upload.id)
-      if (!sameBytes(digest.hash.digest(), upload.sha256)) throw new UploadIntegrityError()
+      if (!sameBytes(digest.hash.digest(), legacyDigest(upload))) throw new UploadIntegrityError()
       const needsBytes = bufferedPublicationNeedsBytes(upload.kind)
-      const frames = needsBytes ? this.#groupBuffer.peekGroup(upload.id, 0, upload.partCount) : undefined
+      const frames = needsBytes ? this.#groupBuffer.peekGroup(upload.id, 0, partCount) : undefined
       if (!needsBytes || frames) {
         return await this.finalizer.prepareBufferedPublication({
           upload,
@@ -1206,8 +1444,8 @@ export class NativeUploadWorker {
       upload,
       stream: codec.decodeObject(storedStream, {
         uploadId: Uint8Array.from(upload.uploadId),
-        logicalByteCount: upload.byteCount,
-        logicalSha256: Uint8Array.from(upload.sha256),
+        logicalByteCount: upload.byteCount ?? 0n,
+        logicalSha256: Uint8Array.from(legacyDigest(upload)),
         frames: work.parts.map((part) => ({
           uploadId: Uint8Array.from(upload.uploadId),
           partIndex: part.partIndex,

@@ -11,7 +11,7 @@ import {
   type InlineUploadPublication,
   type InlineUploadRecord,
 } from "@in/server/db/models/inlineUploads"
-import { filePartHashes, files, inlineUploads } from "@in/server/db/schema"
+import { filePartHashes, files, inlineUploadParts, inlineUploadStorageParts, inlineUploads } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { ApiError, InlineError } from "@in/server/types/errors"
@@ -28,6 +28,7 @@ import { NativeUploadOperations } from "./operations"
 import { UploadPartStorageUnavailableError, type UploadPartStore } from "./partStore"
 import { NativeUploadWorker, storagePartGeometry } from "./worker"
 import { UploadGroupBuffer } from "./groupBuffer"
+import { UploadBlockBuffer } from "./blockBuffer"
 
 setDefaultTimeout(120_000)
 
@@ -57,6 +58,7 @@ const context = (userId: number, sessionId: number): HandlerContext => ({
 
 class MemoryPartStore implements UploadPartStore {
   readonly objects = new Map<string, Uint8Array>()
+  puts = 0
 
   async put(input: {
     uploadId: Uint8Array
@@ -64,6 +66,7 @@ class MemoryPartStore implements UploadPartStore {
     sha256: Uint8Array
     data: Uint8Array
   }): Promise<string> {
+    this.puts += 1
     const key = `${Buffer.from(input.uploadId).toString("hex")}/${input.partIndex}`
     this.objects.set(key, input.data.slice())
     return key
@@ -356,7 +359,7 @@ const makeFinalizer = (expected: Uint8Array, onStored?: () => void): MediaUpload
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer())
     expect(Buffer.from(bytes).equals(Buffer.from(expected))).toBe(true)
     expect(createHash("sha256").update(bytes).digest("hex"))
-      .toBe(Buffer.from(upload.sha256).toString("hex"))
+      .toBe(Buffer.from(upload.sha256!).toString("hex"))
     await assertOwnership()
     onStored?.()
     return publicationFor(upload)
@@ -1314,7 +1317,7 @@ describe("native upload multipart worker", () => {
       expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
       const upload = (await repository.get(created.uploadId, owner))!
       const outcome = await Promise.race([
-        worker.processNow({ id: upload.id, partCount: upload.partCount, kind: upload.kind }, request.signal),
+        worker.processNow({ id: upload.id, partCount: upload.partCount!, kind: upload.kind }, request.signal),
         Bun.sleep(2_000).then(() => "held" as const),
       ])
       // The claimed task continues as ordinary worker work.
@@ -1484,5 +1487,429 @@ describe("native upload multipart worker", () => {
     expect((await operations.cancel({ uploadId: created.uploadId }, requestContext)).canceled).toBe(true)
     expect(buffer.bytes).toBe(0)
     await expect(operations.finish({ uploadId: created.uploadId }, requestContext)).rejects.toThrow()
+  })
+})
+
+/** A finalizer for uploads that may come without a digest: it checks the bytes themselves. */
+const blocksFinalizer = (expected: Uint8Array, seen?: { stored: number; buffered: number }): MediaUploadFinalizer => ({
+  ...makeFinalizer(expected),
+  async prepareStoredPublication({ upload, stream, assertOwnership }) {
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer())
+    expect(Buffer.from(bytes).equals(Buffer.from(expected))).toBe(true)
+    if (seen) seen.stored += 1
+    await assertOwnership()
+    return blocksPublicationFor(upload)
+  },
+  async prepareBufferedPublication({ upload, frames, assertOwnership }) {
+    if (frames) expect(Buffer.concat(frames.map((frame) => Buffer.from(frame))).equals(Buffer.from(expected))).toBe(true)
+    if (seen) seen.buffered += 1
+    await assertOwnership()
+    return blocksPublicationFor(upload)
+  },
+})
+
+/** publicationFor, matching the upload's kind. */
+const blocksPublicationFor = (upload: InlineUploadRecord): InlineUploadPublication => {
+  const publication = publicationFor(upload)
+  switch (upload.kind) {
+    case "video":
+      return {
+        file: { ...publication.file, record: { ...publication.file.record, fileType: "video" } },
+        media: { kind: "video", width: upload.videoWidth ?? 1, height: upload.videoHeight ?? 1,
+          duration: upload.duration ?? 0, isAnimated: false, hasAudio: upload.hasAudio ?? undefined },
+      }
+    case "photo":
+      return {
+        file: { ...publication.file, record: { ...publication.file.record, fileType: "photo", width: 10, height: 10 } },
+        media: { kind: "photo", format: "jpeg", width: 10, height: 10, stripped: null, strippedIv: null, strippedTag: null },
+      }
+    default:
+      return publication
+  }
+}
+
+const patterned = (byteCount: number, seed = 0): Uint8Array => {
+  const body = new Uint8Array(byteCount)
+  for (let index = 0; index < byteCount; index += 1) body[index] = (index * 31 + seed) % 251
+  return body
+}
+
+describe("native upload blocks_v1 storage", () => {
+  setupTestLifecycle()
+
+  /** One server machine: its own block buffer, worker and operations, over shared stores. */
+  const machine = (input: {
+    repository: InlineUploadRepository
+    staging: MemoryPartStore
+    multipart: MemoryMultipartStore
+    finalizer: MediaUploadFinalizer
+    blockBuffer?: UploadBlockBuffer
+  }) => {
+    const blockBuffer = input.blockBuffer ?? new UploadBlockBuffer()
+    const worker = createWorker(input.repository, input.staging, input.multipart, input.finalizer, {
+      concurrency: 4, pollIntervalMs: 20, blockBuffer,
+    })
+    const operations = new NativeUploadOperations(input.repository, input.staging, input.finalizer,
+      (uploadDbId, groupNumber) => worker.wake(uploadDbId, groupNumber),
+      (upload) => worker.discardStorage(upload),
+      (uploadDbId) => worker.cancel(uploadDbId), {
+        finishInline: (upload, signal, stored) => worker.processNow(upload, signal, stored),
+        storageFormat: "blocks_v1",
+        blockBuffer,
+        flush: (uploadDbId, signal) => worker.flush(uploadDbId, signal),
+      })
+    return { worker, operations, blockBuffer }
+  }
+
+  const setup = async (label: string, body: Uint8Array, multipart: MemoryMultipartStore = new PuttingMultipartStore()) => {
+    const user = await testUtils.createUser(`native-upload-blocks-${label}@example.com`)
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const staging = new MemoryPartStore()
+    const seen = { stored: 0, buffered: 0 }
+    const finalizer = blocksFinalizer(body, seen)
+    const primary = machine({ repository, staging, multipart, finalizer })
+    primary.worker.start()
+    return { requestContext, owner, repository, staging, multipart, finalizer, seen, ...primary }
+  }
+
+  const createDocument = (operations: NativeUploadOperations, requestContext: HandlerContext, body: Uint8Array,
+    clientByte: number, options: { digest?: boolean } = {}) => operations.create({
+    clientUploadId: new Uint8Array(16).fill(clientByte),
+    fileName: `blocks-${clientByte}.bin`,
+    mimeType: "application/octet-stream",
+    byteCount: BigInt(body.byteLength),
+    sha256: options.digest ? createHash("sha256").update(body).digest() : new Uint8Array(),
+    kind: UploadKind.DOCUMENT,
+    metadata: { oneofKind: undefined },
+  }, requestContext)
+
+  const sendParts = async (operations: NativeUploadOperations, requestContext: HandlerContext, uploadId: Uint8Array,
+    body: Uint8Array, parts: readonly number[]) => {
+    for (const partIndex of parts) {
+      const offset = partIndex * INLINE_TRANSFER_PART_SIZE
+      await operations.savePart({
+        uploadId,
+        partIndex,
+        data: body.subarray(offset, Math.min(offset + INLINE_TRANSFER_PART_SIZE, body.byteLength)),
+      }, requestContext)
+    }
+  }
+
+  const range = (count: number, from = 0) => Array.from({ length: count }, (_, index) => from + index)
+
+  const storageRows = async (uploadId: Uint8Array, owner: { userId: number; accountSessionId: number },
+    repository: InlineUploadRepository) => {
+    const upload = (await repository.get(uploadId, owner))!
+    return {
+      upload,
+      parts: await db.select().from(inlineUploadParts).where(eq(inlineUploadParts.uploadDbId, upload.id)),
+      blocks: await db.select().from(inlineUploadStorageParts).where(eq(inlineUploadStorageParts.uploadDbId, upload.id)),
+    }
+  }
+
+  test("stores a one-block file with one PUT, no staging and no part rows, and publishes its part hashes", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 3 + 777)
+    const { operations, requestContext, owner, repository, staging, multipart } = await setup("one-block", body)
+    const created = await createDocument(operations, requestContext, body, 1)
+    expect(created.sizeAtFinish).toBe(true)
+    expect(created.partCount).toBe(4)
+    await sendParts(operations, requestContext, created.uploadId, body, [2, 0, 3, 1])
+    // The block was written as soon as all of it arrived, before the finish.
+    await waitFor(() => (multipart as PuttingMultipartStore).putCount === 1)
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0, 1, 2, 3])
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+    expect(staging.puts).toBe(0)
+    expect(multipart.createCount).toBe(0)
+    expect((multipart as PuttingMultipartStore).putCount).toBe(1)
+    const [object] = [...multipart.objects.values()]
+    expect(Buffer.from(object!.bytes).equals(Buffer.from(body))).toBe(true)
+    const rows = await storageRows(created.uploadId, owner, repository)
+    expect(rows.parts).toHaveLength(0)
+    expect(rows.blocks.map((block) => block.storageUploadId)).toEqual(["object"])
+    const [file] = await db.select().from(files).where(eq(files.fileUniqueId, rows.upload.resultFileUniqueId!))
+    const [hashes] = await db.select().from(filePartHashes).where(eq(filePartHashes.fileId, file!.id))
+    const expected = Buffer.concat(range(4).map((index) => createHash("sha256")
+      .update(body.subarray(index * INLINE_TRANSFER_PART_SIZE, (index + 1) * INLINE_TRANSFER_PART_SIZE)).digest()))
+    expect(Buffer.from(hashes!.hashes).equals(expected)).toBe(true)
+  })
+
+  test("writes each 5 MiB block of a large file once, while the file is still arriving", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 25 + 5, 3)
+    const { operations, requestContext, owner, repository, staging, multipart } = await setup("multi-block", body)
+    const created = await createDocument(operations, requestContext, body, 2, { digest: true })
+    await sendParts(operations, requestContext, created.uploadId, body, range(20))
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1 && multipart.uploadPartCounts.get(2) === 1)
+    await sendParts(operations, requestContext, created.uploadId, body, range(6, 20))
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(["complete", "processing"]).toContain(finished.state.oneofKind!)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    expect([...multipart.uploadPartCounts.entries()].sort()).toEqual([[1, 1], [2, 1], [3, 1]])
+    expect(multipart.completeCount).toBe(1)
+    expect(staging.puts).toBe(0)
+    const [object] = [...multipart.objects.values()]
+    expect(Buffer.from(object!.bytes).equals(Buffer.from(body))).toBe(true)
+    const rows = await storageRows(created.uploadId, owner, repository)
+    expect(rows.parts).toHaveLength(0)
+    expect(rows.blocks).toHaveLength(3)
+  })
+
+  test("streams a video of unknown size: size at finish, short last part, first part sent last", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 12 + 4321, 9)
+    const { operations, requestContext, owner, repository, multipart } = await setup("streamed", body)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(3),
+      fileName: "streamed.mp4",
+      mimeType: "video/mp4",
+      byteCount: 0n,
+      sha256: new Uint8Array(),
+      kind: UploadKind.VIDEO,
+      metadata: { oneofKind: "video", video: { width: 1280, height: 720, duration: 30, isAnimated: false, hasAudio: true } },
+    }, requestContext)
+    expect(created.partCount).toBe(0)
+    expect(created.sizeAtFinish).toBe(true)
+    // While encoding: every full part except the first, which the encoder rewrites at the end.
+    await sendParts(operations, requestContext, created.uploadId, body, range(11, 1))
+    // Block 2 (parts 10, 11) can't be written before the size is known; block 1 lacks part 0.
+    expect(multipart.uploadPartCounts.size).toBe(0)
+    // Encoding done: the short last part, then the first.
+    await sendParts(operations, requestContext, created.uploadId, body, [12, 0])
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1)
+    const finished = await operations.finish({ uploadId: created.uploadId, byteCount: BigInt(body.byteLength) },
+      requestContext)
+    expect(["complete", "processing"]).toContain(finished.state.oneofKind!)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    const [object] = [...multipart.objects.values()]
+    expect(Buffer.from(object!.bytes).equals(Buffer.from(body))).toBe(true)
+    const stored = (await repository.get(created.uploadId, owner))!
+    expect(stored.byteCount).toBe(BigInt(body.byteLength))
+    expect(stored.partCount).toBe(13)
+    // The create's replay still matches the upload once its size is set.
+    expect((await operations.create({
+      clientUploadId: new Uint8Array(16).fill(3),
+      fileName: "streamed.mp4",
+      mimeType: "video/mp4",
+      byteCount: 0n,
+      sha256: new Uint8Array(),
+      kind: UploadKind.VIDEO,
+      metadata: { oneofKind: "video", video: { width: 1280, height: 720, duration: 30, isAnimated: false, hasAudio: true } },
+    }, requestContext)).uploadId).toEqual(created.uploadId)
+  })
+
+  test("rejects a finish whose size disagrees with the parts sent while the size was unknown", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 2 + 10, 4)
+    const { operations, requestContext } = await setup("bad-size", body)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(4),
+      fileName: "bad.mp4",
+      mimeType: "video/mp4",
+      byteCount: 0n,
+      sha256: new Uint8Array(),
+      kind: UploadKind.VIDEO,
+      metadata: { oneofKind: "video", video: { width: 640, height: 480, duration: 3, isAnimated: false, hasAudio: false } },
+    }, requestContext)
+    await sendParts(operations, requestContext, created.uploadId, body, [0, 1, 2])
+    // No size at all.
+    await expect(operations.finish({ uploadId: created.uploadId }, requestContext)).rejects.toThrow()
+    // A size whose last part is not the short part that was sent.
+    await expect(operations.finish({ uploadId: created.uploadId, byteCount: BigInt(body.byteLength + 1) }, requestContext))
+      .rejects.toThrow()
+    await expect(operations.finish({ uploadId: created.uploadId, byteCount: BigInt(INLINE_TRANSFER_PART_SIZE * 2) },
+      requestContext)).rejects.toThrow()
+    // A part past the short last part.
+    await expect(sendParts(operations, requestContext, created.uploadId, patterned(INLINE_TRANSFER_PART_SIZE * 4), [3]))
+      .rejects.toThrow()
+    const finished = await operations.finish({ uploadId: created.uploadId, byteCount: BigInt(body.byteLength) },
+      requestContext)
+    expect(["complete", "processing"]).toContain(finished.state.oneofKind!)
+  })
+
+  test("parts held on another machine come back missing, and their resend completes the upload", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 15, 5)
+    const { operations, requestContext, owner, repository, staging, multipart, finalizer } = await setup("two-machines", body)
+    const other = machine({ repository, staging, multipart, finalizer })
+    other.worker.start()
+    const created = await createDocument(operations, requestContext, body, 5)
+    // Block 1 all on this machine; block 2 split: parts 10-12 here, 13-14 after a reconnect elsewhere.
+    await sendParts(operations, requestContext, created.uploadId, body, range(13))
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1)
+    await sendParts(other.operations, requestContext, created.uploadId, body, [13, 14])
+    const missing = await other.operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(missing.state.oneofKind).toBe("missing")
+    if (missing.state.oneofKind !== "missing") throw new Error("expected missing parts")
+    expect(missing.state.missing.partIndices).toEqual([10, 11, 12])
+    await sendParts(other.operations, requestContext, created.uploadId, body, [10, 11, 12])
+    const finished = await other.operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(["complete", "processing"]).toContain(finished.state.oneofKind!)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    const [object] = [...multipart.objects.values()]
+    expect(Buffer.from(object!.bytes).equals(Buffer.from(body))).toBe(true)
+    expect(staging.puts).toBe(0)
+  })
+
+  test("a full block buffer refuses parts with a retry hint instead of dropping held bytes", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 3, 6)
+    const user = await testUtils.createUser("native-upload-blocks-full@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const repository = new InlineUploadRepository()
+    const { operations, blockBuffer } = machine({
+      repository,
+      staging: new MemoryPartStore(),
+      multipart: new PuttingMultipartStore(),
+      finalizer: blocksFinalizer(body),
+      blockBuffer: new UploadBlockBuffer(INLINE_TRANSFER_PART_SIZE * 2),
+    })
+    const created = await createDocument(operations, requestContext, body, 6)
+    await sendParts(operations, requestContext, created.uploadId, body, [0, 1])
+    const refused = await sendParts(operations, requestContext, created.uploadId, body, [2]).catch((error) => error)
+    expect(refused).toBeInstanceOf(Error)
+    expect((refused as { codeNumber?: number }).codeNumber).toBe(503)
+    expect(blockBuffer.heldParts((await repository.get(created.uploadId,
+      { userId: user.id, accountSessionId: account.session.id }))!.id)).toEqual([0, 1])
+  })
+
+  test("cancel drops held parts and the multipart session", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 14, 7)
+    const { operations, requestContext, multipart, blockBuffer } = await setup("cancel", body)
+    const created = await createDocument(operations, requestContext, body, 7)
+    await sendParts(operations, requestContext, created.uploadId, body, range(12))
+    // Block 1 is written and let go; parts 10 and 11 wait for the rest of block 2.
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1 && blockBuffer.bytes === INLINE_TRANSFER_PART_SIZE * 2)
+    expect((await operations.cancel({ uploadId: created.uploadId }, requestContext)).canceled).toBe(true)
+    expect(blockBuffer.bytes).toBe(0)
+    expect(multipart.sessions.size).toBe(0)
+    expect(multipart.objects.size).toBe(0)
+  })
+
+  const createStreamedVideo = (operations: NativeUploadOperations, requestContext: HandlerContext, clientByte: number) =>
+    operations.create({
+      clientUploadId: new Uint8Array(16).fill(clientByte),
+      fileName: `streamed-${clientByte}.mp4`,
+      mimeType: "video/mp4",
+      byteCount: 0n,
+      sha256: new Uint8Array(),
+      kind: UploadKind.VIDEO,
+      metadata: { oneofKind: "video", video: { width: 640, height: 360, duration: 5, isAnimated: false, hasAudio: true } },
+    }, requestContext)
+
+  test("a streamed video whose parts are lost after its size is named completes from their resend elsewhere", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 12 + 999, 10)
+    const { operations, requestContext, owner, repository, staging, multipart, finalizer } = await setup("resend-after-size", body)
+    const created = await createStreamedVideo(operations, requestContext, 10)
+    await sendParts(operations, requestContext, created.uploadId, body, [...range(11, 1), 12, 0])
+    // This machine dies before the finish: a reconnect reaches another one.
+    const other = machine({ repository, staging, multipart, finalizer })
+    other.worker.start()
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1)
+    const first = await other.operations.finish({ uploadId: created.uploadId, byteCount: BigInt(body.byteLength) },
+      requestContext)
+    expect(first.state.oneofKind).toBe("missing")
+    if (first.state.oneofKind !== "missing") throw new Error("expected missing parts")
+    expect(first.state.missing.partIndices).toEqual([10, 11, 12])
+    // The short last part arrives again where the size is known; finish names the size again.
+    await sendParts(other.operations, requestContext, created.uploadId, body, [10, 11, 12])
+    const finished = await other.operations.finish({ uploadId: created.uploadId, byteCount: BigInt(body.byteLength) },
+      requestContext)
+    expect(["complete", "processing"]).toContain(finished.state.oneofKind!)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    const [object] = [...multipart.objects.values()]
+    expect(Buffer.from(object!.bytes).equals(Buffer.from(body))).toBe(true)
+  })
+
+  test("a block another process still holds the claim for makes finish wait, not report parts missing", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 3, 11)
+    const { operations, requestContext, owner, repository, multipart } = await setup("stale-claim", body)
+    const created = await createDocument(operations, requestContext, body, 11)
+    const upload = (await repository.get(created.uploadId, owner))!
+    // A process that died mid-write left its claim.
+    const stale = await repository.claimUploadingCompaction(upload.id)
+    expect(stale).toBeDefined()
+    await sendParts(operations, requestContext, created.uploadId, body, range(3))
+    const waiting = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(waiting.state.oneofKind).toBe("processing")
+    expect((multipart as PuttingMultipartStore).putCount).toBe(0)
+    // Its lease lapses; the next finish writes the block and completes.
+    await repository.releaseProcessingClaim({ uploadDbId: upload.id, lockToken: stale!.lockToken })
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+  })
+
+  test("each stored block keeps an active upload from idling out", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 12, 12)
+    const { operations, requestContext, owner, repository, multipart } = await setup("expiry-bump", body)
+    const created = await createDocument(operations, requestContext, body, 12)
+    const soon = new Date(Date.now() + 60_000)
+    await db.update(inlineUploads).set({ expiresAt: soon }).where(eq(inlineUploads.uploadId, Buffer.from(created.uploadId)))
+    await sendParts(operations, requestContext, created.uploadId, body, range(10))
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))!.expiresAt.getTime() > soon.getTime() + 60_000)
+  })
+
+  test("a photo larger than one block is written as it arrives and read back to validate", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 12 + 3, 13)
+    const { operations, requestContext, owner, repository, blockBuffer, multipart, seen } = await setup("big-photo", body)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(13),
+      fileName: "big.jpg",
+      mimeType: "image/jpeg",
+      byteCount: BigInt(body.byteLength),
+      sha256: new Uint8Array(),
+      kind: UploadKind.PHOTO,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await sendParts(operations, requestContext, created.uploadId, body, range(13))
+    // Both blocks are written as they complete (the size is known, so the short last one too), and
+    // neither stays in memory: the photo is read back to validate.
+    await waitFor(() => multipart.uploadPartCounts.get(1) === 1 && multipart.uploadPartCounts.get(2) === 1)
+    await waitFor(() => blockBuffer.bytes === 0)
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(["complete", "processing"]).toContain(finished.state.oneofKind!)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    expect(seen.stored).toBe(1)
+  })
+
+  test("a process still in a deploy's overlap stages new uploads, but gives clients that need blocks_v1 blocks_v1", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE + 5, 14)
+    const user = await testUtils.createUser("native-upload-blocks-gate@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const operations = new NativeUploadOperations(repository, new MemoryPartStore(), blocksFinalizer(body),
+      () => {}, async () => {}, () => {}, { storageFormat: () => "identity_v1" })
+    const staged = await createDocument(operations, requestContext, body, 14, { digest: true })
+    expect(staged.sizeAtFinish).toBeUndefined()
+    expect((await repository.get(staged.uploadId, owner))?.storageFormat).toBe("identity_v1")
+    const digestless = await createDocument(operations, requestContext, body, 15)
+    expect(digestless.sizeAtFinish).toBe(true)
+    expect((await repository.get(digestless.uploadId, owner))?.storageFormat).toBe("blocks_v1")
+    const streamed = await createStreamedVideo(operations, requestContext, 16)
+    const streamedRow = (await repository.get(streamed.uploadId, owner))!
+    expect(streamedRow.storageFormat).toBe("blocks_v1")
+    // It reserves a video's maximum, so it idles out within the hour unless blocks keep arriving.
+    expect(streamedRow.expiresAt.getTime()).toBeLessThan(Date.now() + 2 * 60 * 60 * 1_000)
+  })
+
+  test("a photo keeps its bytes for validation, so publication reads nothing back", async () => {
+    const body = patterned(INLINE_TRANSFER_PART_SIZE * 2 + 50, 8)
+    const { operations, requestContext, multipart, seen } = await setup("photo", body)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(8),
+      fileName: "photo.jpg",
+      mimeType: "image/jpeg",
+      byteCount: BigInt(body.byteLength),
+      sha256: new Uint8Array(),
+      kind: UploadKind.PHOTO,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await sendParts(operations, requestContext, created.uploadId, body, range(3))
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+    expect(seen).toEqual({ stored: 0, buffered: 1 })
+    expect(multipart.streams).toBe(0)
   })
 })
