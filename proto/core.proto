@@ -6597,7 +6597,13 @@ message CreateUploadInput {
   bytes client_upload_id = 1;
   string file_name = 2;
   string mime_type = 3;
+  // 0 when the client doesn't know the size yet (a video still encoding): it streams the file and
+  // FinishUploadInput.byte_count names the size. Only for servers that set
+  // CreateUploadResult.size_at_finish. Until then every part is part-size long except the last,
+  // which is sent whole (no pieces) and ends the file.
   uint64 byte_count = 4;
+  // SHA-256 of the whole file. Optional on servers that set size_at_finish: every message is
+  // already checked by the transport, as with Telegram's uploads.
   bytes sha256 = 5;
   UploadKind kind = 6;
   optional string thumbnail_file_unique_id = 7;
@@ -6629,6 +6635,8 @@ message CreateUploadResult {
   // multiple of this many bytes and is a multiple of it long, except the piece that ends its part.
   // Clients send whole parts when it is unset.
   optional uint32 piece_granularity = 7;
+  // Set by servers that take byte_count 0 and an empty sha256 at create, with the size at finish.
+  optional bool size_at_finish = 8;
 }
 
 message SaveUploadPartInput {
@@ -6681,6 +6689,8 @@ message FinishUploadInput {
   // Names the video's or document's thumbnail when the create did not, so the upload can start
   // before its thumbnail has finished uploading.
   optional string thumbnail_file_unique_id = 2;
+  // The file's size, when the create sent byte_count 0. Must match the create's otherwise.
+  optional uint64 byte_count = 3;
 }
 
 message UploadMissingParts { repeated uint32 part_indices = 1; }

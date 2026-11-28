@@ -29167,8 +29167,14 @@ public nonisolated struct CreateUploadInput: Sendable {
 
   public var mimeType: String = String()
 
+  /// 0 when the client doesn't know the size yet (a video still encoding): it streams the file and
+  /// FinishUploadInput.byte_count names the size. Only for servers that set
+  /// CreateUploadResult.size_at_finish. Until then every part is part-size long except the last,
+  /// which is sent whole (no pieces) and ends the file.
   public var byteCount: UInt64 = 0
 
+  /// SHA-256 of the whole file. Optional on servers that set size_at_finish: every message is
+  /// already checked by the transport, as with Telegram's uploads.
   public var sha256: Data = Data()
 
   public var kind: UploadKind = .unspecified
@@ -29292,6 +29298,16 @@ public nonisolated struct CreateUploadResult: @unchecked Sendable {
   public var hasPieceGranularity: Bool {_storage._pieceGranularity != nil}
   /// Clears the value of `pieceGranularity`. Subsequent reads from it will return its default value.
   public mutating func clearPieceGranularity() {_uniqueStorage()._pieceGranularity = nil}
+
+  /// Set by servers that take byte_count 0 and an empty sha256 at create, with the size at finish.
+  public var sizeAtFinish: Bool {
+    get {_storage._sizeAtFinish ?? false}
+    set {_uniqueStorage()._sizeAtFinish = newValue}
+  }
+  /// Returns true if `sizeAtFinish` has been explicitly set.
+  public var hasSizeAtFinish: Bool {_storage._sizeAtFinish != nil}
+  /// Clears the value of `sizeAtFinish`. Subsequent reads from it will return its default value.
+  public mutating func clearSizeAtFinish() {_uniqueStorage()._sizeAtFinish = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -29528,11 +29544,22 @@ public nonisolated struct FinishUploadInput: Sendable {
   /// Clears the value of `thumbnailFileUniqueID`. Subsequent reads from it will return its default value.
   public mutating func clearThumbnailFileUniqueID() {self._thumbnailFileUniqueID = nil}
 
+  /// The file's size, when the create sent byte_count 0. Must match the create's otherwise.
+  public var byteCount: UInt64 {
+    get {_byteCount ?? 0}
+    set {_byteCount = newValue}
+  }
+  /// Returns true if `byteCount` has been explicitly set.
+  public var hasByteCount: Bool {self._byteCount != nil}
+  /// Clears the value of `byteCount`. Subsequent reads from it will return its default value.
+  public mutating func clearByteCount() {self._byteCount = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _thumbnailFileUniqueID: String? = nil
+  fileprivate var _byteCount: UInt64? = nil
 }
 
 public nonisolated struct UploadMissingParts: Sendable {
@@ -68864,7 +68891,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0\u{1}complete\0\u{3}piece_granularity\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0\u{1}complete\0\u{3}piece_granularity\0\u{3}size_at_finish\0")
 
   fileprivate class _StorageClass {
     var _uploadID: Data = Data()
@@ -68874,6 +68901,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
     var _acceptedParts: [UInt32] = []
     var _complete: UploadComplete? = nil
     var _pieceGranularity: UInt32? = nil
+    var _sizeAtFinish: Bool? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -68891,6 +68919,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
       _acceptedParts = source._acceptedParts
       _complete = source._complete
       _pieceGranularity = source._pieceGranularity
+      _sizeAtFinish = source._sizeAtFinish
     }
   }
 
@@ -68916,6 +68945,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
         case 5: try { try decoder.decodeRepeatedUInt32Field(value: &_storage._acceptedParts) }()
         case 6: try { try decoder.decodeSingularMessageField(value: &_storage._complete) }()
         case 7: try { try decoder.decodeSingularUInt32Field(value: &_storage._pieceGranularity) }()
+        case 8: try { try decoder.decodeSingularBoolField(value: &_storage._sizeAtFinish) }()
         default: break
         }
       }
@@ -68949,6 +68979,9 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
       try { if let v = _storage._pieceGranularity {
         try visitor.visitSingularUInt32Field(value: v, fieldNumber: 7)
       } }()
+      try { if let v = _storage._sizeAtFinish {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -68965,6 +68998,7 @@ nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._
         if _storage._acceptedParts != rhs_storage._acceptedParts {return false}
         if _storage._complete != rhs_storage._complete {return false}
         if _storage._pieceGranularity != rhs_storage._pieceGranularity {return false}
+        if _storage._sizeAtFinish != rhs_storage._sizeAtFinish {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -69321,7 +69355,7 @@ nonisolated extension GetUploadStateResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension FinishUploadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "FinishUploadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}thumbnail_file_unique_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}thumbnail_file_unique_id\0\u{3}byte_count\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -69331,6 +69365,7 @@ nonisolated extension FinishUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self._thumbnailFileUniqueID) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self._byteCount) }()
       default: break
       }
     }
@@ -69347,12 +69382,16 @@ nonisolated extension FinishUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     try { if let v = self._thumbnailFileUniqueID {
       try visitor.visitSingularStringField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._byteCount {
+      try visitor.visitSingularUInt64Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: FinishUploadInput, rhs: FinishUploadInput) -> Bool {
     if lhs.uploadID != rhs.uploadID {return false}
     if lhs._thumbnailFileUniqueID != rhs._thumbnailFileUniqueID {return false}
+    if lhs._byteCount != rhs._byteCount {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

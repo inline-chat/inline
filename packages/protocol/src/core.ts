@@ -17489,10 +17489,18 @@ export interface CreateUploadInput {
      */
     mimeType: string;
     /**
+     * 0 when the client doesn't know the size yet (a video still encoding): it streams the file and
+     * FinishUploadInput.byte_count names the size. Only for servers that set
+     * CreateUploadResult.size_at_finish. Until then every part is part-size long except the last,
+     * which is sent whole (no pieces) and ends the file.
+     *
      * @generated from protobuf field: uint64 byte_count = 4;
      */
     byteCount: bigint;
     /**
+     * SHA-256 of the whole file. Optional on servers that set size_at_finish: every message is
+     * already checked by the transport, as with Telegram's uploads.
+     *
      * @generated from protobuf field: bytes sha256 = 5;
      */
     sha256: Uint8Array;
@@ -17579,6 +17587,12 @@ export interface CreateUploadResult {
      * @generated from protobuf field: optional uint32 piece_granularity = 7;
      */
     pieceGranularity?: number;
+    /**
+     * Set by servers that take byte_count 0 and an empty sha256 at create, with the size at finish.
+     *
+     * @generated from protobuf field: optional bool size_at_finish = 8;
+     */
+    sizeAtFinish?: boolean;
 }
 /**
  * @generated from protobuf message SaveUploadPartInput
@@ -17739,6 +17753,12 @@ export interface FinishUploadInput {
      * @generated from protobuf field: optional string thumbnail_file_unique_id = 2;
      */
     thumbnailFileUniqueId?: string;
+    /**
+     * The file's size, when the create sent byte_count 0. Must match the create's otherwise.
+     *
+     * @generated from protobuf field: optional uint64 byte_count = 3;
+     */
+    byteCount?: bigint;
 }
 /**
  * @generated from protobuf message UploadMissingParts
@@ -65548,7 +65568,8 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
             { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
             { no: 6, name: "complete", kind: "message", T: () => UploadComplete },
-            { no: 7, name: "piece_granularity", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+            { no: 7, name: "piece_granularity", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 8, name: "size_at_finish", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<CreateUploadResult>): CreateUploadResult {
@@ -65592,6 +65613,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
                 case /* optional uint32 piece_granularity */ 7:
                     message.pieceGranularity = reader.uint32();
                     break;
+                case /* optional bool size_at_finish */ 8:
+                    message.sizeAtFinish = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -65629,6 +65653,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
         /* optional uint32 piece_granularity = 7; */
         if (message.pieceGranularity !== undefined)
             writer.tag(7, WireType.Varint).uint32(message.pieceGranularity);
+        /* optional bool size_at_finish = 8; */
+        if (message.sizeAtFinish !== undefined)
+            writer.tag(8, WireType.Varint).bool(message.sizeAtFinish);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -66028,7 +66055,8 @@ class FinishUploadInput$Type extends MessageType<FinishUploadInput> {
     constructor() {
         super("FinishUploadInput", [
             { no: 1, name: "upload_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
-            { no: 2, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 2, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "byte_count", kind: "scalar", opt: true, T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<FinishUploadInput>): FinishUploadInput {
@@ -66049,6 +66077,9 @@ class FinishUploadInput$Type extends MessageType<FinishUploadInput> {
                 case /* optional string thumbnail_file_unique_id */ 2:
                     message.thumbnailFileUniqueId = reader.string();
                     break;
+                case /* optional uint64 byte_count */ 3:
+                    message.byteCount = reader.uint64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -66067,6 +66098,9 @@ class FinishUploadInput$Type extends MessageType<FinishUploadInput> {
         /* optional string thumbnail_file_unique_id = 2; */
         if (message.thumbnailFileUniqueId !== undefined)
             writer.tag(2, WireType.LengthDelimited).string(message.thumbnailFileUniqueId);
+        /* optional uint64 byte_count = 3; */
+        if (message.byteCount !== undefined)
+            writer.tag(3, WireType.Varint).uint64(message.byteCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
