@@ -8,6 +8,8 @@ extension ComposeView {
   private static let draftLog = Log.scoped("ComposeView.DraftManagement")
 
   func startDraftSaveTimer() {
+    // While editing a message the composer holds the edit, not the draft.
+    guard draftBeforeEdit == nil else { return }
     draftManager.scheduleSave(peerId: peerId) { [weak self] in
       self?.textView.attributedText ?? NSAttributedString()
     }
@@ -19,7 +21,8 @@ extension ComposeView {
   }
 
   func saveDraftIfNeeded() {
-    draftManager.save(peerId: peerId, attributedString: textView.attributedText ?? NSAttributedString())
+    let draft = draftBeforeEdit ?? textView.attributedText ?? NSAttributedString()
+    draftManager.save(peerId: peerId, attributedString: draft)
   }
 
   // MARK: - Draft Management
@@ -99,6 +102,8 @@ extension ComposeView {
   }
 
   func clearDraft() {
+    // Ending an edit clears the composer; the set-aside draft is restored, not dropped.
+    guard draftBeforeEdit == nil else { return }
     draftManager.clear(peerId: peerId)
   }
 

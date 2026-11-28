@@ -226,6 +226,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private lazy var mentionedParticipantsAccess = MentionedParticipantsAccessManager(composeView: self)
   var autocompleteManager: ComposeAutocompleteManager?
   let draftManager: DraftManager
+  /// The unsent draft set aside while a message is edited in the composer. It stays the
+  /// persisted draft during the edit and comes back once the edit is sent or cancelled.
+  var draftBeforeEdit: NSAttributedString?
 
   let previewViewModel = SwiftUIPhotoPreviewViewModel()
   let multiPhotoPreviewViewModel = SwiftUIPhotoPreviewViewModel()
@@ -1748,8 +1751,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     refreshSuggestion()
 
     if isEditing {
-      // Stop draft timer when editing a message
+      // Set the draft aside (switching from one edit to another keeps the first copy)
+      // and persist it now, since the debounced save may not have run yet.
       stopDraftSaveTimer()
+      if draftBeforeEdit == nil {
+        draftBeforeEdit = NSAttributedString(attributedString: textView.attributedText ?? NSAttributedString())
+        saveDraftIfNeeded()
+      }
 
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
@@ -1784,10 +1792,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           self?.updateHeight()
         }
       }
-    } else {
-      // Resume draft timer when exiting edit mode if there's text
-      if let text = textView.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        startDraftSaveTimer()
+    } else if draftBeforeEdit != nil {
+      // Cancel and send clear the edit text right after this notification, synchronously,
+      // so the draft goes back on the next turn of the main queue.
+      DispatchQueue.main.async { [weak self] in
+        self?.restoreDraftAfterEdit()
       }
     }
     updateEmbedState(animated: true)
@@ -1891,6 +1900,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     hideEmbedView(animated: animated)
+  }
+
+  private func restoreDraftAfterEdit() {
+    guard let peerId, let draft = draftBeforeEdit else { return }
+    guard ChatState.shared.getState(peer: peerId).editingMessageId == nil else { return }
+    draftBeforeEdit = nil
+    autocompleteManager?.dismissCompletion()
+    textView.attributedText = draft
+    textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+    textView.resetTypingAttributesToDefault()
+    let hasText = !draft.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    textView.showPlaceholder(!hasText)
+    updateSendButtonVisibility()
+    updateHeight()
+    if hasText { startDraftSaveTimer() }
   }
 
   private func clearEditingComposeState() {
