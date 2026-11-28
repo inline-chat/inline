@@ -1391,6 +1391,7 @@ public actor InlineProtocolV3Connection {
 
   static func failureLogLevel(for error: any Error) -> LogLevel {
     if error is CancellationError { return .debug }
+    if TransientSocketError.isTransient(error) { return .debug }
     if let urlError = error as? URLError {
       switch urlError.code {
       case .cancelled,

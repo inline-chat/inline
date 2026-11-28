@@ -18,6 +18,22 @@ struct RealtimeV3LoggingPolicyTests {
         for: InlineProtocolV3ConnectionError.closed
       ) == .debug
     )
+    // Network.framework reports dropped sockets as POSIX errors, not URLError.
+    #expect(
+      InlineProtocolV3Connection.failureLogLevel(
+        for: NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNRESET))
+      ) == .debug
+    )
+    #expect(
+      InlineProtocolV3Connection.failureLogLevel(
+        for: NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTCONN))
+      ) == .debug
+    )
+    #expect(
+      InlineProtocolV3Connection.failureLogLevel(
+        for: NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
+      ) == .error
+    )
   }
 
   @Test("recoverable pressure and timeout remain warnings")

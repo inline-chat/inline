@@ -231,6 +231,26 @@ struct LogSourceLocation: Sendable {
   let line: Int
 }
 
+/// Socket errors Network.framework surfaces as `NSPOSIXErrorDomain` when a
+/// connection drops or the network path changes (ECONNRESET 54, ENOTCONN 57, …).
+/// The device recovers from these on its own; they are not app failures.
+public enum TransientSocketError {
+  public static func isTransient(errno code: Int32) -> Bool {
+    switch code {
+      case ECONNRESET, ENOTCONN, ECONNABORTED, ETIMEDOUT, ENETDOWN, ENETUNREACH,
+           ENETRESET, EHOSTUNREACH, EHOSTDOWN, EPIPE:
+        return true
+      default:
+        return false
+    }
+  }
+
+  public static func isTransient(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    return nsError.domain == NSPOSIXErrorDomain && isTransient(errno: Int32(truncatingIfNeeded: nsError.code))
+  }
+}
+
 enum SentryLogPolicy {
   /// Expected while offline, reconnecting or backgrounded. The caller retries or
   /// the next sync reconciles, so these stay breadcrumbs instead of issues.
@@ -277,6 +297,9 @@ enum SentryLogPolicy {
           default:
             return false
         }
+      }
+      if nsError.domain == NSPOSIXErrorDomain {
+        return TransientSocketError.isTransient(errno: Int32(truncatingIfNeeded: nsError.code))
       }
       current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
       depth += 1

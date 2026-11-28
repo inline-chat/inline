@@ -218,6 +218,13 @@ struct LoggerPrivacyProjectionTests {
     #expect(SentryLogPolicy.isTransientNetworkError(wrapped))
     #expect(!SentryLogPolicy.isTransientNetworkError(NSError(domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse)))
     #expect(!SentryLogPolicy.isTransientNetworkError(NSError(domain: "SUSparkleErrorDomain", code: 2001)))
+    #expect(SentryLogPolicy.isTransientNetworkError(NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNRESET))))
+    #expect(SentryLogPolicy.isTransientNetworkError(NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTCONN))))
+    #expect(SentryLogPolicy.isTransientNetworkError(NSError(
+      domain: "Wrapper", code: 1,
+      userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNRESET))]
+    )))
+    #expect(!SentryLogPolicy.isTransientNetworkError(NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))))
   }
 
   @Test("HTTP diagnostics omit unsafe request identifiers")
