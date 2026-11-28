@@ -149,6 +149,16 @@ _INLINE_MAINTENANCE_COMMAND_RE = re.compile(
 _INLINE_SETTINGS_VERSION = 1
 _TURN_THREADS_MAX = 512
 _INLINE_BOT_SETTINGS_VERSION = 1
+# "Open Dashboard": the Hermes dashboard (``hermes dashboard``) on its default loopback port, or
+# ``dashboard.public_url`` when the owner published one.
+_DASHBOARD_ITEM_ID = "dashboard"
+_DASHBOARD_PORT = 9119
+# Inline waits 10s for a settings answer; leave room for the rest of it.
+_DASHBOARD_START_WAIT_SECONDS = 5.0
+_DASHBOARD_LOOPBACK_ONLY_TEXT = (
+    "The Hermes dashboard only listens on that computer. To open it from other devices, put it "
+    "behind Tailscale or a proxy, set dashboard.public_url, and turn on a dashboard sign-in."
+)
 _INLINE_BOT_SETTINGS_UNAVAILABLE = 1
 _INLINE_BOT_SETTINGS_INVALID_VALUE = 2
 _INLINE_BOT_SETTINGS_STALE = 3
@@ -1841,6 +1851,8 @@ class InlineAdapter(BasePlatformAdapter):
         self._last_catalog_sync: Optional[Dict[str, Any]] = None
         self._inbound_task: Optional[asyncio.Task] = None
         self._bot_settings_tasks: set[asyncio.Task] = set()
+        # A dashboard this adapter started for "Open Dashboard"; it stops with the adapter.
+        self._dashboard_process: Optional[subprocess.Popen] = None
         self._inbound_deliveries: Dict[str, asyncio.Task] = {}
         self._handled_deliveries: OrderedDict[str, bool] = OrderedDict()
         self._inbound_failure_reported = False
@@ -2024,6 +2036,103 @@ class InlineAdapter(BasePlatformAdapter):
             return chat_type == "dm"
         return policy.can_run(actor_id, "threads")
 
+    def _may_open_dashboard(self, actor_id: str, chat_type: str) -> bool:
+        """The dashboard manages the whole Hermes install, so only Hermes admins get it. Without
+        admin lists Hermes treats everyone as admin, and so does this."""
+        policy = self._slash_access_policy(chat_type)
+        if policy is None:
+            return chat_type == "dm"
+        is_admin = getattr(policy, "is_admin", None)
+        if callable(is_admin):
+            return bool(is_admin(actor_id))
+        # An older policy without admin lookup: whoever may run admin-only /threads.
+        return bool(policy.can_run(actor_id, "threads"))
+
+    @staticmethod
+    def _dashboard_public_url() -> str:
+        try:
+            from hermes_cli.config import load_config_readonly
+
+            cfg = load_config_readonly() or {}
+        except Exception:
+            return ""
+        dashboard = cfg.get("dashboard") if isinstance(cfg, dict) else None
+        url = str((dashboard or {}).get("public_url") or "").strip() if isinstance(dashboard, dict) else ""
+        return url if url.startswith(("https://", "http://")) else ""
+
+    @staticmethod
+    def _dashboard_host_label() -> str:
+        name = socket.gethostname()
+        return re.sub(r"\.local$", "", name, flags=re.IGNORECASE) or "the Hermes computer"
+
+    @staticmethod
+    async def _dashboard_listening(port: int) -> bool:
+        try:
+            _, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=0.5)
+        except (OSError, asyncio.TimeoutError):
+            return False
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return True
+
+    def _start_dashboard(self, port: int) -> bool:
+        if self._dashboard_process is not None and self._dashboard_process.poll() is None:
+            return True
+        try:
+            # Same interpreter and environment (HERMES_HOME, profile) as this gateway. It stays
+            # in the gateway's process group, so it also stops when the service stops.
+            self._dashboard_process = subprocess.Popen(
+                [sys.executable, "-m", "hermes_cli.main", "dashboard", "--no-open", "--port", str(port)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        except Exception as exc:
+            self._report_error("dashboard.start", exc)
+            logger.warning("[inline] could not start the Hermes dashboard: %s", exc)
+            return False
+        logger.info("[inline] started the Hermes dashboard for Open Dashboard pid=%s", self._dashboard_process.pid)
+        return True
+
+    def _stop_dashboard(self) -> None:
+        process, self._dashboard_process = self._dashboard_process, None
+        if process is None or process.poll() is not None:
+            return
+        with contextlib.suppress(Exception):
+            process.terminate()
+
+    async def _dashboard_response_ui(self) -> Dict[str, Any]:
+        """What Inline shows the person who pressed Open Dashboard: the dashboard to open, or why
+        it can't open yet."""
+        host = self._dashboard_host_label()
+        public_url = self._dashboard_public_url()
+        if public_url:
+            # Behind the owner's own proxy; the dashboard's sign-in applies there.
+            return {"kind": {"oneofKind": "openUrl", "openUrl": {
+                "url": public_url, "sensitive": False, "hostLabel": host,
+            }}}
+        if not await self._dashboard_listening(_DASHBOARD_PORT):
+            if not self._start_dashboard(_DASHBOARD_PORT):
+                return {"kind": {"oneofKind": "alert", "alert": {
+                    "title": "Dashboard unavailable",
+                    "text": f"Hermes couldn't start its dashboard on {host}. Run hermes dashboard there.",
+                }}}
+            deadline = time.monotonic() + _DASHBOARD_START_WAIT_SECONDS
+            while not await self._dashboard_listening(_DASHBOARD_PORT):
+                if time.monotonic() >= deadline:
+                    return {"kind": {"oneofKind": "alert", "alert": {
+                        "title": "Dashboard starting",
+                        "text": f"The Hermes dashboard is starting on {host}. Press Open Dashboard again in a few seconds.",
+                    }}}
+                await asyncio.sleep(0.25)
+        # On loopback the dashboard signs the browser in itself; the URL carries no credential.
+        return {"kind": {"oneofKind": "openUrl", "openUrl": {
+            "url": f"http://127.0.0.1:{_DASHBOARD_PORT}/",
+            "sensitive": False,
+            "hostLabel": host,
+            "unreachableText": _DASHBOARD_LOOPBACK_ONLY_TEXT,
+        }}}
+
     def note_turn_thread(self, chat_id: str, message_id: str, thread_id: str) -> None:
         """The agent opened a thread on the message it is answering; the answer goes there."""
         key = (self._chat_key(chat_id), str(message_id))
@@ -2140,6 +2249,7 @@ class InlineAdapter(BasePlatformAdapter):
             "reply_threads": self._reply_thread_mode_for_chat(scope_chat_id) if can_set_reply_threads else None,
             "can_set_reply_threads": can_set_reply_threads,
             "can_set_default_model": can_modify,
+            "can_open_dashboard": bool(can_modify) and self._may_open_dashboard(actor_id, chat_type),
             "source": source,
             "runner": runner,
             "model_options": [],
@@ -2335,7 +2445,7 @@ class InlineAdapter(BasePlatformAdapter):
             if context.get("can_set_default_model") and current_model != context.get("default_model"):
                 runtime_items.append({
                     "id": "model-default", "label": "Use as default", "description": "For new sessions.", **common,
-                    "control": {"oneofKind": "button", "button": {}},
+                    "control": {"oneofKind": "button", "button": {"opensUrl": False}},
                 })
         reasoning_options = context.get("reasoning_options") or []
         if context.get("reasoning") and reasoning_options:
@@ -2396,6 +2506,12 @@ class InlineAdapter(BasePlatformAdapter):
                              else "Changing reply mode requires access to the parent chat."),
                     "tone": _INLINE_BOT_SETTINGS_TONE_WARNING,
                 }},
+            }]})
+        if context.get("can_open_dashboard") and not disabled:
+            sections.append({"id": "dashboard", "items": [{
+                "id": _DASHBOARD_ITEM_ID, "label": "Open Dashboard",
+                "description": "Hermes dashboard in your browser.", "disabled": False,
+                "control": {"oneofKind": "button", "button": {"opensUrl": True}},
             }]})
         if disabled:
             sections.append({"id": "access", "items": [{
@@ -2583,6 +2699,17 @@ class InlineAdapter(BasePlatformAdapter):
                     "You do not have access to change this.",
                     document,
                 )
+            elif item_id == _DASHBOARD_ITEM_ID:
+                if not context.get("can_open_dashboard") or event.get("value"):
+                    response = self._bot_settings_problem(
+                        _INLINE_BOT_SETTINGS_INVALID_VALUE, "Dashboard unavailable.", document,
+                    )
+                else:
+                    # Opening a page changes no setting: the same document, plus what to open.
+                    response = {
+                        "result": {"oneofKind": "document", "document": document},
+                        "ui": await self._dashboard_response_ui(),
+                    }
             else:
                 await self._apply_bot_setting(event, context)
                 next_context = await self._bot_settings_context(event, model_catalog=context)
@@ -2933,6 +3060,7 @@ class InlineAdapter(BasePlatformAdapter):
             await asyncio.gather(*self._bot_settings_tasks, return_exceptions=True)
             self._bot_settings_tasks.clear()
         self._activity_stop()
+        self._stop_dashboard()
         await self._stop_sidecar()
         if self._http_client is not None:
             await self._http_client.aclose()

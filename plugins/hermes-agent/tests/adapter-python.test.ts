@@ -7033,6 +7033,66 @@ async def assert_bot_settings_document_and_mutation():
 
 asyncio.run(assert_bot_settings_document_and_mutation())
 
+async def assert_bot_settings_dashboard():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    context = {
+        "access": "full", "scope_id": "42", "chat_id": "42", "actor_id": "7", "chat_type": "dm",
+        "is_reply_thread": False, "following": None, "reply_threads": "auto", "can_set_reply_threads": True,
+        "runner": None, "source": None, "model_options": [], "model_map": {}, "reasoning_options": [],
+        "can_open_dashboard": True,
+    }
+    document = adapter._bot_settings_document(context)
+    dashboard = next(section for section in document["sections"] if section["id"] == "dashboard")["items"][0]
+    assert dashboard["label"] == "Open Dashboard"
+    assert dashboard["control"] == {"oneofKind": "button", "button": {"opensUrl": True}}
+    assert "dashboard" not in {s["id"] for s in adapter._bot_settings_document({**context, "can_open_dashboard": False})["sections"]}
+    assert "dashboard" not in {s["id"] for s in adapter._bot_settings_document({**context, "access": "readOnly"})["sections"]}
+
+    adapter._dashboard_host_label = lambda: "Mo's MacBook Pro"
+    adapter._dashboard_public_url = lambda: ""
+    listening = [True]
+    async def fake_listening(port):
+        assert port == 9119
+        return listening[0]
+    adapter._dashboard_listening = fake_listening
+    starts = []
+    adapter._start_dashboard = lambda port: starts.append(port) or True
+
+    ui = await adapter._dashboard_response_ui()
+    assert ui["kind"]["oneofKind"] == "openUrl"
+    assert ui["kind"]["openUrl"]["url"] == "http://127.0.0.1:9119/"
+    assert ui["kind"]["openUrl"]["sensitive"] is False
+    assert ui["kind"]["openUrl"]["hostLabel"] == "Mo's MacBook Pro"
+    assert "dashboard.public_url" in ui["kind"]["openUrl"]["unreachableText"]
+    assert starts == []
+
+    # Not running: start it once, then open it as soon as it listens.
+    listening[0] = False
+    async def becomes_ready(port):
+        ready = bool(starts)
+        return ready
+    adapter._dashboard_listening = becomes_ready
+    ui = await adapter._dashboard_response_ui()
+    assert starts == [9119]
+    assert ui["kind"]["openUrl"]["url"] == "http://127.0.0.1:9119/"
+
+    # A published dashboard wins and needs no local process.
+    adapter._dashboard_public_url = lambda: "https://hermes.example.com/"
+    ui = await adapter._dashboard_response_ui()
+    assert ui["kind"]["openUrl"] == {"url": "https://hermes.example.com/", "sensitive": False, "hostLabel": "Mo's MacBook Pro"}
+
+    # A failed start explains itself instead of opening a dead page.
+    adapter._dashboard_public_url = lambda: ""
+    async def never(port):
+        return False
+    adapter._dashboard_listening = never
+    adapter._start_dashboard = lambda port: False
+    ui = await adapter._dashboard_response_ui()
+    assert ui["kind"]["oneofKind"] == "alert"
+    assert "Mo's MacBook Pro" in ui["kind"]["alert"]["text"]
+
+asyncio.run(assert_bot_settings_dashboard())
+
 def assert_bot_settings_context_window():
     # Inline's composer draws a context circle from session.context:<used>:<window>, as Hermes'
     # /usage reports it for the chat's resident agent; nothing shows before a first turn.
