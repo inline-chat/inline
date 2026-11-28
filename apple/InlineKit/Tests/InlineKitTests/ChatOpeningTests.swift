@@ -7,6 +7,49 @@ import Testing
 struct ChatOpeningTests {
   private static let peer = Peer.thread(id: 1)
 
+  // MARK: Day start
+
+  /// A day pill's jump (fixture messages are dated at their id, in seconds): the day's first cached message, and
+  /// whether unknown history lies just before it (then older history is fetched first).
+  @Test @MainActor
+  func dayStartIsTheFirstMessageOfTheDayWhenHistoryBeforeItIsKnown() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    try await fixture.cache(rows: [1 ... 2_400], certified: [1 ... Self.max])
+    let found = try await fixture.database.reader.read { db in
+      try ChatDayStart.earliestCached(
+        db, peer: Self.peer, dayStart: Date(timeIntervalSince1970: 1_000), dayEnd: Date(timeIntervalSince1970: 1_100)
+      )
+    }
+    #expect(found?.messageId == 1_000)
+    #expect(found?.holeBefore == false)
+    // Certified history: no fetch, the cached first message.
+    let first = try await ChatDayStart.firstMessageId(
+      peer: Self.peer, dayStart: Date(timeIntervalSince1970: 1_000), dayEnd: Date(timeIntervalSince1970: 1_100),
+      database: fixture.database
+    )
+    #expect(first == 1_000)
+  }
+
+  @Test @MainActor
+  func dayStartAfterAHoleAsksForOlderHistory() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    try await fixture.cache(rows: [1_050 ... 2_400], certified: [1_050 ... Self.max])
+    let found = try await fixture.database.reader.read { db in
+      try ChatDayStart.earliestCached(
+        db, peer: Self.peer, dayStart: Date(timeIntervalSince1970: 1_000), dayEnd: Date(timeIntervalSince1970: 1_100)
+      )
+    }
+    #expect(found?.messageId == 1_050)
+    #expect(found?.holeBefore == true)
+    // A day with nothing cached has no start to go to.
+    let none = try await fixture.database.reader.read { db in
+      try ChatDayStart.earliestCached(
+        db, peer: Self.peer, dayStart: Date(timeIntervalSince1970: 3_000), dayEnd: Date(timeIntervalSince1970: 3_100)
+      )
+    }
+    #expect(none == nil)
+  }
+
   // MARK: Saved place
 
   @Test @MainActor
