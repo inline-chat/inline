@@ -63,6 +63,40 @@ enum MessageActionPerformer {
     }
   }
 
+  /// A bot's answer to a press made on this device: toast, alert, or a URL to
+  /// open in the default browser while the press is still fresh.
+  static func presentResponse(_ ui: BotResponseUi, pressedAt: Date, in window: NSWindow?) {
+    switch ui {
+    case let .toast(text):
+      ToastCenter.shared.showInfo(text)
+    case let .alert(alert):
+      presentAlert(alert, in: window)
+    case let .openURL(open):
+      openResponseURL(open, pressedAt: pressedAt, in: window)
+    }
+  }
+
+  static func openResponseURL(_ open: BotResponseOpenURL, pressedAt: Date, in window: NSWindow?) {
+    Task { @MainActor in
+      switch await BotResponseURLResolver.decide(open, pressedAt: pressedAt) {
+      case let .open(url):
+        if !InlineWebLinkOpener.open(url) {
+          ToastCenter.shared.showError(String(localized: "No app can open this link"))
+        }
+      case let .confirm(url, confirmation):
+        confirm([confirmation][...], destructive: false, in: window) {
+          if !NSWorkspace.shared.open(url) {
+            ToastCenter.shared.showError(String(localized: "No app can open this link"))
+          }
+        }
+      case let .unreachable(alert):
+        presentAlert(alert, in: window)
+      case .expired:
+        ToastCenter.shared.showInfo(String(localized: "The link took too long to arrive. Try again."))
+      }
+    }
+  }
+
   static func presentAlert(_ alert: MessageActionAlertContent, in window: NSWindow?) {
     let panel = NSAlert()
     panel.messageText = alert.title ?? alert.text

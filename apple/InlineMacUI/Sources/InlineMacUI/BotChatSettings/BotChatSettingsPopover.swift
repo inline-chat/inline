@@ -395,12 +395,26 @@ private struct BotChatSettingsItemRow: View {
       .help(item.isDisabled ? help : selected?.description ?? item.description ?? "")
     case let .info(text, tone):
       BotChatSettingsInfoRow(label: item.label, text: text, description: item.description, tone: tone)
-    case .button:
+    case let .button(opensURL):
       HStack(spacing: 6) {
-          Button(label) { onInvoke(item.id, nil) }
+          Button {
+            onInvoke(item.id, nil)
+          } label: {
+            if opensURL {
+              // The arrow says it leaves Inline, as links to the web do in Apple's apps.
+              HStack(spacing: 3) {
+                Text(label)
+                Image(systemName: "arrow.up.forward")
+                  .font(.caption.weight(.semibold))
+                  .accessibilityHidden(true)
+              }
+            } else {
+              Text(label)
+            }
+          }
             .buttonStyle(.link)
             .disabled(item.isDisabled || isPending)
-            .accessibilityHint(help)
+            .accessibilityHint(opensURL ? String(localized: "Opens in your browser") : help)
           if isPending {
             ProgressView().controlSize(.mini)
           }

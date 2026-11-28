@@ -642,6 +642,9 @@ class MinimalMessageViewAppKit: NSView {
         if let alert = event.alert {
           MessageActionPerformer.presentAlert(alert, in: window)
         }
+        if let openURL = event.openURL {
+          MessageActionPerformer.openResponseURL(openURL, pressedAt: event.pressedAt, in: window)
+        }
       }
   }
 

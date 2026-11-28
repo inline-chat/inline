@@ -9,7 +9,8 @@ struct BotChatSettingsRendererTests {
     (BotChatSettingsModel.Control.toggle(value: true), BotChatSettingsControlKind.toggle),
     (.select(value: "auto", options: []), .select),
     (.info(text: "Guide", tone: .neutral), .info),
-    (.button, .button),
+    (.button(), .button),
+    (.button(opensURL: true), .button),
     (
       .folder(
         value: "workspace-one",

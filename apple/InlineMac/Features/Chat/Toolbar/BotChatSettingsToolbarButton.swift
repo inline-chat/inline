@@ -49,7 +49,13 @@ struct BotChatSettingsToolbarButton: View {
     }
     .help("Agent Settings")
     .accessibilityLabel("Agent Settings")
-    .onAppear { toolbarState.handleAppear(.botSettings) }
+    .onAppear {
+      toolbarState.handleAppear(.botSettings)
+      // An agent's answer to a pressed item, such as opening its dashboard.
+      coordinator.responseUiHandler = { ui, pressedAt in
+        MessageActionPerformer.presentResponse(ui, pressedAt: pressedAt, in: NSApp.mainWindow)
+      }
+    }
     .onDisappear { toolbarState.handleDisappear(.botSettings) }
     .popover(isPresented: Binding(
       get: { toolbarState.presentation == .botSettings(anchor) },
