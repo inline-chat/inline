@@ -117,6 +117,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// What the view model was last told about the reader's place.
   private var reportedPlace: (atBottom: Bool, messageId: Int64?)?
   private var jumpTask: Task<Void, Never>?
+  /// A day pill's tap is still finding the day's start (`jumpTask` runs it).
+  private var dayStartSearching = false
   private var returnToLatestTask: Task<Void, Never>?
   /// A drag during a return to latest: its fetch finishes, but it no longer moves the list.
   private var returnToLatestInterrupted = false
@@ -1567,11 +1569,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     blockedEdges.removeAll()
     if pendingFocus?.awaitsArrival == true, jumpTask == nil { pendingFocus = nil }
     if returnToLatestTask != nil { returnToLatestInterrupted = true }
+    // A day pill's tap still finding the day's start (older pages can come from the server): the reader's drag drops
+    // it, so a slow fetch never yanks them back later.
+    if dayStartSearching { cancelPendingMessageFocus() }
   }
 
   func cancelPendingMessageFocus() {
     // A move the reader asked for (a focus, the latest messages, a day) leaves the opening place.
     holdsOpeningPlace = false
+    dayStartSearching = false
     jumpTask?.cancel()
     jumpTask = nil
     pendingFocus = nil
@@ -1584,8 +1590,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   /// Where a focus lands: its top row at the top when the window has it, else the message centred.
   private func focusScroll(_ row: ChatRowID, in snapshot: ChatRowSnapshot) -> TimelineScroll<ChatRowID> {
-    if let top = pendingFocus?.topRow, snapshot.index(of: top) != nil { return .to(top, .top(0)) }
-    return .to(row, .center)
+    guard let top = pendingFocus?.topRow else { return .to(row, .center) }
+    // A window that starts at the day's first message has no day row above it: that message goes to the top.
+    return snapshot.index(of: top) != nil ? .to(top, .top(0)) : .to(row, .top(0))
   }
 
   private func focus(_ messageID: Int64, requiresExactMessage: Bool, highlights: Bool, topRow: ChatRowID? = nil) {
@@ -1608,7 +1615,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     // A row already loaded: there now, or where the chat opens (the first layout places it).
     if viewModel.historyCoverage.isCertifiedMessage(messageID) {
       if hasOpened, let snapshot, let focus = resolveFocus(in: snapshot, exactOnly: true) {
-        let near = list.layout.placement(for: topRow ?? focus.row) != nil || list.layout.placement(for: focus.row) != nil
+        let near = list.layout.placement(for: focus.row) != nil || topRow.map { list.layout.placement(for: $0) != nil } == true
         list.apply(TimelineTransaction(
           scroll: focusScroll(focus.row, in: snapshot), timing: near ? Self.rowTiming : Self.jumpTiming,
           towards: direction(of: .message(messageID), from: messageIdOnScreen())
@@ -2168,10 +2175,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     scheduleDatePillHide()
     let end = Calendar.autoupdatingCurrent.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
     let peer = peer
+    dayStartSearching = true
     jumpTask = Task { @MainActor [weak self] in
       let first = try? await ChatDayStart.firstMessageId(peer: peer, dayStart: day, dayEnd: end)
       guard let self, !Task.isCancelled else { return }
       jumpTask = nil
+      dayStartSearching = false
       guard let first else { return }
       focus(first, requiresExactMessage: false, highlights: false, topRow: .daySeparator(day))
     }
