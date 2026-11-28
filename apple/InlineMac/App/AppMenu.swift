@@ -279,11 +279,13 @@ final class AppMenu: NSObject {
     )
     pasteAndMatchStyleItem.keyEquivalentModifierMask = [.command, .option, .shift]
     editMenu.addItem(pasteAndMatchStyleItem)
+    // No key equivalent: as a menu shortcut ⌘⌫ would be claimed here and never
+    // reach text views, where it deletes to the start of the line.
     editMenu.addItem(
       withTitle: "Delete",
       action: #selector(NSText.delete(_:)),
-      keyEquivalent: "\u{8}"
-    ) // Backspace key
+      keyEquivalent: ""
+    )
     editMenu.addItem(
       withTitle: "Select All",
       action: #selector(NSText.selectAll(_:)),
@@ -557,11 +559,13 @@ final class AppMenu: NSObject {
 
     viewMenu.addItem(NSMenuItem.separator())
 
-    viewMenu.addItem(
+    // ⌃⌘F per the HIG; plain ⌘F belongs to Edit > Find, which is matched first.
+    let fullScreenItem = viewMenu.addItem(
       withTitle: "Toggle Full Screen",
       action: #selector(NSWindow.toggleFullScreen(_:)),
       keyEquivalent: "f"
     )
+    fullScreenItem.keyEquivalentModifierMask = [.control, .command]
 
     viewMenu.addItem(NSMenuItem.separator())
 
