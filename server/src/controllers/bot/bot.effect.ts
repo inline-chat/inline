@@ -304,7 +304,7 @@ const BotMethodDocumentation = {
       "Adds the bot's emoji reaction to a message. Returns an empty result when the reaction is applied.",
   },
   deleteReaction: { summary: "Delete a reaction", description: "Removes the bot's emoji reaction from one message." },
-  answerMessageAction: { summary: "Answer a message action", description: "Acknowledges an action interaction and optionally shows a short toast." },
+  answerMessageAction: { summary: "Answer a message action", description: "Acknowledges an action interaction and optionally shows a short toast, or opens `url` for the person who pressed on the device they pressed on. Set `url_sensitive` when the URL carries a credential such as a one-time login: Inline then keeps it out of logs and synced history. Send `text` or `url`, not both." },
   sendChatAction: { summary: "Send a chat action", description: "Publishes a short-lived typing or upload indicator." },
   getFile: { summary: "Get a file", description: "Returns metadata and a short-lived download URL for a Bot-owned file or a file in a currently accessible message. Pass chat_id and message_id of that message; the file_id-only form is legacy." },
   getUpdates: { summary: "Get updates", description: "Long-polls the authenticated Bot's bounded pending-update queue." },

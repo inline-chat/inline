@@ -3,7 +3,7 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { normalizeActionResponseUi } from "@in/server/modules/message/messageActions"
+import { normalizeActionResponseUi, storedActionResponseUi } from "@in/server/modules/message/messageActions"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -35,7 +35,7 @@ export const answerMessageAction = async (input: Input, context: FunctionContext
   }
 
   // A message button, or a work bar control relayed to the session's bot:
-  // both are answered with a toast for the person who pressed it.
+  // both are answered with a toast, alert or URL for the person who pressed it.
   const decrypted = UpdatesModel.decrypt(invocation)
   const update = decrypted.payload.update
   const payload =
@@ -59,7 +59,7 @@ export const answerMessageAction = async (input: Input, context: FunctionContext
       oneofKind: "userMessageActionAnswered",
       userMessageActionAnswered: {
         interactionId: BigInt(interactionSeq),
-        ui: normalizedUi,
+        ui: storedActionResponseUi(normalizedUi),
       },
     },
   })

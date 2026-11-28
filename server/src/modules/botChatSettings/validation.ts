@@ -11,6 +11,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { BOT_CHAT_SETTINGS_VERSION } from "@in/server/functions/bot.capabilitiesShared"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { normalizeActionResponseUi } from "@in/server/modules/message/messageActions"
 
 export const BOT_CHAT_SETTINGS_LIMITS = {
   sections: 100,
@@ -160,7 +161,7 @@ function normalizeItem(item: BotChatSettingsItem): BotChatSettingsItem {
     }
     case "button":
       if (!common.label) throw invalid("button_label_missing")
-      return { ...common, control: { oneofKind: "button", button: {} } }
+      return { ...common, control: { oneofKind: "button", button: { opensUrl: item.control.button.opensUrl } } }
     case "folder": {
       if (!common.label || item.control.folder.recentFolders.length === 0 ||
         item.control.folder.recentFolders.length > BOT_CHAT_SETTINGS_LIMITS.folderOptions) {
@@ -237,6 +238,26 @@ export function normalizeBotChatSettingsDocument(document: BotChatSettingsDocume
 }
 
 export function normalizeBotChatSettingsResponse(
+  response: BotChatSettingsResponse | undefined,
+): BotChatSettingsResponse {
+  const result = normalizeBotChatSettingsResult(response)
+  let ui
+  try {
+    ui = normalizeActionResponseUi(response?.ui)
+  } catch {
+    throw invalid("response_ui_invalid")
+  }
+  return ui ? { ...result, ui } : result
+}
+
+/** Settings fetches never act for the person; only item invocations do. */
+export function withoutBotChatSettingsUi(response: BotChatSettingsResponse): BotChatSettingsResponse {
+  if (!response.ui) return response
+  const { ui: _ui, ...rest } = response
+  return rest
+}
+
+function normalizeBotChatSettingsResult(
   response: BotChatSettingsResponse | undefined,
 ): BotChatSettingsResponse {
   switch (response?.result.oneofKind) {

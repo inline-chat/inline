@@ -24,6 +24,10 @@ const maxToastTextLength = 256
 const maxAlertTitleLength = 128
 const maxAlertTextLength = 2048
 const maxUrlLength = 2048
+// One-time login links (OpenClaw bootstrap tokens) run longer than buttons.
+const maxResponseUrlLength = 4096
+const maxHostLabelLength = 128
+const maxUnreachableTextLength = 1024
 const maxConfirmTitleLength = 128
 const maxConfirmTextLength = 1024
 
@@ -43,9 +47,9 @@ function boundedText(value: string | undefined, maxLength: number, required: boo
 }
 
 /** Web URLs and app links such as codex://threads/<id>; never script or local schemes. */
-export function validActionUrl(value: string): string {
+export function validActionUrl(value: string, maxLength: number = maxUrlLength): string {
   const url = value.trim()
-  if (url.length < 1 || url.length > maxUrlLength || /\s/.test(url)) throw RealtimeRpcError.BadRequest()
+  if (url.length < 1 || url.length > maxLength || /\s/.test(url)) throw RealtimeRpcError.BadRequest()
   const scheme = urlSchemePattern.exec(url)?.[1]?.toLowerCase()
   if (!scheme || blockedUrlSchemes.has(scheme)) throw RealtimeRpcError.BadRequest()
   try {
@@ -53,6 +57,14 @@ export function validActionUrl(value: string): string {
   } catch {
     throw RealtimeRpcError.BadRequest()
   }
+  return url
+}
+
+/** A URL a bot answers with. A user:password part would hide the real host. */
+function validResponseUrl(value: string): string {
+  const url = validActionUrl(value, maxResponseUrlLength)
+  const parsed = new URL(url)
+  if (parsed.username || parsed.password) throw RealtimeRpcError.BadRequest()
   return url
 }
 
@@ -235,7 +247,32 @@ export function normalizeActionResponseUi(
           },
         },
       })
+    case "openUrl":
+      return MessageActionResponseUi.create({
+        kind: {
+          oneofKind: "openUrl",
+          openUrl: {
+            url: validResponseUrl(ui.kind.openUrl.url),
+            sensitive: ui.kind.openUrl.sensitive,
+            hostLabel: boundedText(ui.kind.openUrl.hostLabel, maxHostLabelLength, false),
+            unreachableText: boundedText(ui.kind.openUrl.unreachableText, maxUnreachableTextLength, false),
+          },
+        },
+      })
     default:
       throw RealtimeRpcError.BadRequest()
   }
+}
+
+/**
+ * The copy of an answer kept for sync. A sensitive URL is a credential, so only
+ * the live delivery carries it; apps never open answers from catch-up anyway.
+ */
+export function storedActionResponseUi(
+  ui: MessageActionResponseUi | undefined,
+): MessageActionResponseUi | undefined {
+  if (ui?.kind.oneofKind !== "openUrl" || !ui.kind.openUrl.sensitive) return ui
+  return MessageActionResponseUi.create({
+    kind: { oneofKind: "openUrl", openUrl: { ...ui.kind.openUrl, url: "" } },
+  })
 }

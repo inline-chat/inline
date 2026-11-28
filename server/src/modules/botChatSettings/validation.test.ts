@@ -8,7 +8,9 @@ import {
   BOT_CHAT_SETTINGS_LIMITS,
   normalizeBotChatSettingsDocument,
   normalizeBotChatSettingsResponse,
+  withoutBotChatSettingsUi,
 } from "./validation"
+import { normalizeActionResponseUi, storedActionResponseUi } from "@in/server/modules/message/messageActions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 const document = (): BotChatSettingsDocument => ({
@@ -51,7 +53,7 @@ const document = (): BotChatSettingsDocument => ({
         id: "default-model",
         label: "Use as default",
         disabled: false,
-        control: { oneofKind: "button", button: {} },
+        control: { oneofKind: "button", button: { opensUrl: false } },
       },
       {
         id: "workspace",
@@ -169,7 +171,7 @@ describe("bot chat settings validation", () => {
         id: "following",
         label: "Duplicate",
         disabled: false,
-        control: { oneofKind: "button", button: {} },
+        control: { oneofKind: "button", button: { opensUrl: false } },
       }],
     })
 
@@ -184,7 +186,7 @@ describe("bot chat settings validation", () => {
         id: `item-${index}`,
         label: `Item ${index}`,
         disabled: false,
-        control: { oneofKind: "button" as const, button: {} },
+        control: { oneofKind: "button" as const, button: { opensUrl: false } },
       })),
     }]
 
@@ -201,5 +203,76 @@ describe("bot chat settings validation", () => {
         },
       },
     })).toThrow()
+  })
+})
+
+describe("bot chat settings answers that act for the person", () => {
+  const withUi = (url: string, sensitive = true) => ({
+    result: { oneofKind: "document" as const, document: document() },
+    ui: {
+      kind: {
+        oneofKind: "openUrl" as const,
+        openUrl: { url, sensitive, hostLabel: " Mo's MacBook Pro ", unreachableText: "Turn on Tailscale Serve." },
+      },
+    },
+  })
+
+  test("keeps an open_url answer and a button's opens_url hint", () => {
+    const doc = document()
+    doc.sections[0]!.items.push({
+      id: "dashboard",
+      label: "Open Dashboard",
+      disabled: false,
+      control: { oneofKind: "button", button: { opensUrl: true } },
+    })
+    const normalized = normalizeBotChatSettingsResponse({
+      ...withUi("http://127.0.0.1:18789/#bootstrapToken=abc"),
+      result: { oneofKind: "document", document: doc },
+    })
+    expect(normalized.ui?.kind).toEqual({
+      oneofKind: "openUrl",
+      openUrl: {
+        url: "http://127.0.0.1:18789/#bootstrapToken=abc",
+        sensitive: true,
+        hostLabel: "Mo's MacBook Pro",
+        unreachableText: "Turn on Tailscale Serve.",
+      },
+    })
+    const item = normalized.result.oneofKind === "document"
+      ? normalized.result.document.sections[0]!.items.find((entry) => entry.id === "dashboard")
+      : undefined
+    expect(item?.control).toEqual({ oneofKind: "button", button: { opensUrl: true } })
+  })
+
+  test("rejects script URLs and hidden credentials in the host part", () => {
+    for (const url of ["javascript:alert(1)", "https://user:pass@example.com/", "https://exa mple.com"]) {
+      expect(() => normalizeBotChatSettingsResponse(withUi(url))).toThrow(RealtimeRpcError)
+    }
+  })
+
+  test("settings fetches drop the answer ui", () => {
+    const normalized = normalizeBotChatSettingsResponse(withUi("https://example.com/"))
+    expect(withoutBotChatSettingsUi(normalized).ui).toBeUndefined()
+    expect(withoutBotChatSettingsUi(normalized).result.oneofKind).toBe("document")
+  })
+})
+
+describe("stored copies of message action answers", () => {
+  test("drop a sensitive URL and keep everything else", () => {
+    const ui = normalizeActionResponseUi({
+      kind: { oneofKind: "openUrl", openUrl: { url: "https://example.com/#ticket=secret", sensitive: true } },
+    })
+    expect(ui?.kind.oneofKind === "openUrl" && ui.kind.openUrl.url).toBe("https://example.com/#ticket=secret")
+    const stored = storedActionResponseUi(ui)
+    expect(stored?.kind).toEqual({ oneofKind: "openUrl", openUrl: { url: "", sensitive: true } })
+  })
+
+  test("keep plain URLs and toasts unchanged", () => {
+    const plain = normalizeActionResponseUi({
+      kind: { oneofKind: "openUrl", openUrl: { url: "https://example.com/", sensitive: false } },
+    })
+    expect(storedActionResponseUi(plain)).toEqual(plain)
+    const toast = normalizeActionResponseUi({ kind: { oneofKind: "toast", toast: { text: "Done" } } })
+    expect(storedActionResponseUi(toast)).toEqual(toast)
   })
 })

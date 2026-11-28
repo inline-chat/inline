@@ -1,7 +1,7 @@
 import type { FunctionContext } from "./_types"
 import { resolveCapableBotForPeer } from "./bot.chatSettingsShared"
 import { botChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
-import { normalizeBotChatSettingsResponse, unreachableBotChatSettingsResponse } from "@in/server/modules/botChatSettings/validation"
+import { normalizeBotChatSettingsResponse, unreachableBotChatSettingsResponse, withoutBotChatSettingsUi } from "@in/server/modules/botChatSettings/validation"
 import { getRealtimeBotConnection, sendMessageToRealtimeBotConnection } from "@in/server/realtime/message"
 import { BotChatSettingsResponse, ServerMessage, type RequestBotChatSettingsInput, type RequestBotChatSettingsResult } from "@inline-chat/protocol/core"
 import { requestRemoteBot } from "@in/server/modules/internalMessaging/privateBot"
@@ -65,5 +65,5 @@ export async function requestBotChatSettings(
     version: input.version,
     actorUserId: context.currentUserId,
   })
-  return { response }
+  return { response: withoutBotChatSettingsUi(response) }
 }

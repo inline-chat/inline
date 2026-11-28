@@ -1967,14 +1967,22 @@ const answerMessageAction = async (
 ) => {
   const interactionId = normalizeInputId(input.interaction_id)
   if (!interactionId) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-  const ui = input.text === undefined
-    ? undefined
-    : MessageActionResponseUi.create({
+  if (input.text !== undefined && input.url !== undefined) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  const ui = input.url !== undefined
+    ? MessageActionResponseUi.create({
         kind: {
-          oneofKind: "toast",
-          toast: MessageActionToast.create({ text: input.text }),
+          oneofKind: "openUrl",
+          openUrl: { url: input.url, sensitive: input.url_sensitive === true },
         },
       })
+    : input.text === undefined
+      ? undefined
+      : MessageActionResponseUi.create({
+          kind: {
+            oneofKind: "toast",
+            toast: MessageActionToast.create({ text: input.text }),
+          },
+        })
   await answerMessageActionFn({ interactionId: BigInt(interactionId), ui }, context)
   return {}
 }

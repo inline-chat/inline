@@ -1280,6 +1280,8 @@ export const DeleteReactionInput = SendReactionInput.annotate({
 export const AnswerMessageActionInput = Schema.Struct({
   interaction_id: MessageId,
   text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  url: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+  url_sensitive: Schema.optionalKey(Schema.Boolean),
 }).annotate({ identifier: "AnswerMessageActionInput" })
 
 export const BotChatAction = Schema.Literals([
