@@ -263,6 +263,12 @@ pub(crate) enum ActionData {
     /// A next-step answer, `l` its label, given back to the agent as input.
     #[serde(rename = "ns")]
     NextStep { l: String },
+    /// Open native session `s` from this machine in a new thread.
+    #[serde(rename = "os")]
+    OpenSession { s: String },
+    /// The picker's next page, after the first `o` sessions.
+    #[serde(rename = "sm")]
+    MoreSessions { o: usize },
 }
 
 pub(crate) enum Command {
@@ -1286,7 +1292,9 @@ impl Actor {
             | ActionData::RaiseGateBudget
             | ActionData::Plan { .. }
             | ActionData::Task { .. }
-            | ActionData::NextStep { .. } => None,
+            | ActionData::NextStep { .. }
+            | ActionData::OpenSession { .. }
+            | ActionData::MoreSessions { .. } => None,
             ActionData::Pick { i, f, o } => {
                 let label = self
                     .cards
@@ -1809,6 +1817,7 @@ impl Actor {
     }
 
     async fn acquire(&mut self) -> Option<HoldEvent> {
+        self.catch_up_import().await;
         // A session the holder probe already resumed is adopted like any
         // other, with its tools, title and settings.
         if let Some(session) = self.probe.take() {
@@ -1860,6 +1869,35 @@ impl Actor {
                 .await;
                 Some(HoldEvent::Detached)
             }
+        }
+    }
+
+    /// An imported thread first takes in what the native app added since its
+    /// last pass (or the rest of an import a restart cut short), so those
+    /// turns read before the one about to run.
+    async fn catch_up_import(&mut self) {
+        const LIMIT: Duration = Duration::from_secs(20);
+        if self.native.is_none() {
+            return;
+        }
+        let folder = self.folder();
+        match tokio::time::timeout(
+            LIMIT,
+            super::import::pass(&self.agent, self.chat_id, Some(&folder)),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => log::warn!(
+                target: "inline::bridge::v2",
+                "import catch-up failed chat={}: {error}",
+                self.chat_id
+            ),
+            Err(_) => log::warn!(
+                target: "inline::bridge::v2",
+                "slow step=import_catch_up chat={}",
+                self.chat_id
+            ),
         }
     }
 
@@ -4768,7 +4806,7 @@ fn action_style(style: ActionStyle) -> proto::message_action::Style {
 const MAX_BUTTON_UTF16: usize = 64;
 
 /// The harness's or agent's label, shortened to fit a button.
-fn button_text(label: &str) -> String {
+pub(crate) fn button_text(label: &str) -> String {
     super::blocks::fit_utf16(label, MAX_BUTTON_UTF16)
 }
 

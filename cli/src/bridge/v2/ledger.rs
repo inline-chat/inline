@@ -163,6 +163,15 @@ impl Ledger {
                  created_at INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS v2_children_lead ON v2_children (lead_chat_id);
+             CREATE TABLE IF NOT EXISTS v2_imports (
+                 chat_id INTEGER PRIMARY KEY,
+                 session_ref TEXT NOT NULL,
+                 agent_session_id INTEGER NOT NULL,
+                 state TEXT NOT NULL,
+                 seen_at INTEGER,
+                 updated_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS v2_imports_session ON v2_imports (session_ref);
              CREATE TABLE IF NOT EXISTS v2_lead_events (
                  event_id TEXT PRIMARY KEY,
                  lead_chat_id INTEGER NOT NULL,
@@ -257,6 +266,74 @@ impl Ledger {
         rows.collect()
     }
 
+    /// Records a thread that imports a native session's history. It stays
+    /// `importing` until every row is in Inline, so a restart finishes it.
+    pub(crate) fn begin_import(
+        &self,
+        chat_id: i64,
+        session_ref: &str,
+        agent_session_id: i64,
+    ) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "INSERT INTO v2_imports (chat_id, session_ref, agent_session_id, state, seen_at, updated_at)
+             VALUES (?1, ?2, ?3, 'importing', NULL, ?4)
+             ON CONFLICT (chat_id) DO UPDATE SET session_ref = ?2, agent_session_id = ?3,
+                 state = 'importing', updated_at = ?4",
+            params![chat_id, session_ref, agent_session_id, now_seconds()],
+        )?;
+        Ok(())
+    }
+
+    /// The import caught up with the native session as it stood at `seen_at`
+    /// (its last update, Unix seconds).
+    pub(crate) fn imported(&self, chat_id: i64, seen_at: Option<i64>) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "UPDATE v2_imports SET state = 'ready', seen_at = COALESCE(?2, seen_at), updated_at = ?3
+             WHERE chat_id = ?1",
+            params![chat_id, seen_at, now_seconds()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn import_of(&self, chat_id: i64) -> rusqlite::Result<Option<ImportRecord>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection
+            .query_row(
+                "SELECT chat_id, session_ref, agent_session_id, state, seen_at FROM v2_imports
+                 WHERE chat_id = ?1",
+                params![chat_id],
+                import_record,
+            )
+            .optional()
+    }
+
+    /// The thread that imported this native session, if any.
+    pub(crate) fn import_by_session(
+        &self,
+        session_ref: &str,
+    ) -> rusqlite::Result<Option<ImportRecord>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection
+            .query_row(
+                "SELECT chat_id, session_ref, agent_session_id, state, seen_at FROM v2_imports
+                 WHERE session_ref = ?1 ORDER BY updated_at DESC LIMIT 1",
+                params![session_ref],
+                import_record,
+            )
+            .optional()
+    }
+
+    pub(crate) fn imports(&self) -> rusqlite::Result<Vec<ImportRecord>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement = connection.prepare(
+            "SELECT chat_id, session_ref, agent_session_id, state, seen_at FROM v2_imports",
+        )?;
+        let rows = statement.query_map([], import_record)?;
+        rows.collect()
+    }
+
     /// Retain a work's choices in its destination before asking Inline to move it.
     /// The source remains intact, including when the operation creates a fork.
     pub(crate) fn copy_thread(&self, from: i64, to: i64) -> rusqlite::Result<()> {
@@ -293,6 +370,10 @@ impl Ledger {
         tx.execute(
             "INSERT INTO v2_work_moves (source_chat_id, destination_chat_id) VALUES (?1, ?2)
                     ON CONFLICT (source_chat_id) DO UPDATE SET destination_chat_id = ?2",
+            params![from, to],
+        )?;
+        tx.execute(
+            "UPDATE OR REPLACE v2_imports SET chat_id = ?2 WHERE chat_id = ?1",
             params![from, to],
         )?;
         tx.execute(
@@ -531,6 +612,28 @@ fn row_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<InputRecord>> 
     }))
 }
 
+/// A thread that imported a native session (see [`Ledger::begin_import`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ImportRecord {
+    pub chat_id: i64,
+    pub session_ref: String,
+    pub agent_session_id: i64,
+    /// Every row of the first import is in Inline.
+    pub ready: bool,
+    /// The native session's last update the thread caught up with.
+    pub seen_at: Option<i64>,
+}
+
+fn import_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportRecord> {
+    Ok(ImportRecord {
+        chat_id: row.get(0)?,
+        session_ref: row.get(1)?,
+        agent_session_id: row.get(2)?,
+        ready: row.get::<_, String>(3)? == "ready",
+        seen_at: row.get(4)?,
+    })
+}
+
 fn now_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -562,6 +665,27 @@ mod tests {
         assert_eq!(ledger.unresolved().unwrap().len(), 1);
         ledger.set(&id, InputState::Consumed).unwrap();
         assert!(ledger.unresolved().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_import_finishes_after_a_restart_and_follows_a_move() {
+        let ledger = Ledger::in_memory().unwrap();
+        ledger.begin_import(10, "s-1", 7).unwrap();
+        let record = ledger.import_of(10).unwrap().unwrap();
+        assert!(
+            !record.ready,
+            "a started import is finished after a restart"
+        );
+        ledger.imported(10, Some(500)).unwrap();
+        let record = ledger.import_by_session("s-1").unwrap().unwrap();
+        assert!(record.ready);
+        assert_eq!(record.seen_at, Some(500));
+        ledger.imported(10, None).unwrap();
+        assert_eq!(ledger.import_of(10).unwrap().unwrap().seen_at, Some(500));
+        ledger.move_thread(10, 11).unwrap();
+        assert!(ledger.import_of(10).unwrap().is_none());
+        assert_eq!(ledger.import_of(11).unwrap().unwrap().session_ref, "s-1");
+        assert_eq!(ledger.imports().unwrap().len(), 1);
     }
 
     #[test]

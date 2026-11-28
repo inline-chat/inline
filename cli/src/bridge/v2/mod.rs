@@ -11,6 +11,7 @@ pub(crate) mod doc;
 mod e2e;
 pub(crate) mod files;
 pub(crate) mod folders;
+pub(crate) mod import;
 pub(crate) mod intake;
 pub(crate) mod lead;
 pub(crate) mod ledger;

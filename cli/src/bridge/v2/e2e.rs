@@ -2308,6 +2308,592 @@ async fn wait_card(
     }
 }
 
+/// Every message of a chat, oldest first: (id, sender, time, text).
+async fn chat_messages(owner: &InlineClient, chat_id: i64) -> Vec<(i64, i64, i64, String)> {
+    let page = owner
+        .history(HistoryRequest {
+            chat_id: InlineId::new(chat_id),
+            limit: Some(100),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .unwrap();
+    let mut messages: Vec<_> = page
+        .messages
+        .into_iter()
+        .map(|message| {
+            let text = match message.content {
+                MessageContent::Text { text } => text,
+                other => format!("{other:?}"),
+            };
+            (
+                message.message_id.get(),
+                message.sender_id.get(),
+                message.timestamp,
+                text,
+            )
+        })
+        .collect();
+    messages.sort_by_key(|message| message.0);
+    messages
+}
+
+/// Runs one turn on a Codex thread outside Inline, over `codex app-server`
+/// as the Codex app does (no Inline client id or envelope), and returns the
+/// thread's id.
+async fn codex_turn_outside_inline(
+    folder: &std::path::Path,
+    resume: Option<&str>,
+    text: &str,
+) -> String {
+    use tokio::process::Command;
+    let mut child = Command::new(which_codex())
+        .arg("app-server")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut next_id = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    macro_rules! call {
+        ($method:expr, $params:expr) => {{
+            next_id += 1;
+            let id = next_id;
+            let line = json!({"jsonrpc": "2.0", "id": id, "method": $method, "params": $params});
+            stdin.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+            loop {
+                let line = tokio::time::timeout_at(deadline, lines.next_line())
+                    .await
+                    .expect("codex answered in time")
+                    .unwrap()
+                    .expect("codex app-server kept running");
+                let message: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+                if message.get("id") == Some(&json!(id)) {
+                    assert!(message.get("error").is_none(), "{} failed: {message}", $method);
+                    break message["result"].clone();
+                }
+            }
+        }};
+    }
+    call!(
+        "initialize",
+        json!({"clientInfo": {"name": "e2e-outside", "version": "0"}})
+    );
+    stdin
+        .write_all(format!("{}\n", json!({"jsonrpc": "2.0", "method": "initialized"})).as_bytes())
+        .await
+        .unwrap();
+    let thread = match resume {
+        Some(id) => call!("thread/resume", json!({"threadId": id, "cwd": folder})),
+        None => call!("thread/start", json!({"cwd": folder})),
+    };
+    let thread_id = thread["thread"]["id"]
+        .as_str()
+        .expect("a thread id")
+        .to_owned();
+    call!(
+        "turn/start",
+        json!({"threadId": thread_id, "input": [{"type": "text", "text": text}]})
+    );
+    loop {
+        let line = tokio::time::timeout_at(deadline, lines.next_line())
+            .await
+            .expect("the outside turn finished in time")
+            .unwrap()
+            .expect("codex app-server kept running");
+        let message: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+        if message.get("method") == Some(&json!("turn/completed")) {
+            break;
+        }
+    }
+    drop(stdin);
+    let _ = child.kill().await;
+    thread_id
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the server side of the bridge v2 end-to-end test"]
+async fn codex_opens_a_session_from_the_machine() {
+    let _ = env_logger::builder()
+        .is_test(true)
+        .parse_filters("inline::bridge::v2=debug,inline_client=info")
+        .try_init();
+    let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
+    let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();
+    let dm_chat_id: i64 = env("INLINE_V2_E2E_DM_CHAT_ID").parse().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = std::fs::canonicalize(dir.path()).unwrap().join("project");
+    std::fs::create_dir_all(&folder).unwrap();
+    // The bridge lists a second folder (see CodexBridge::start_with).
+    std::fs::create_dir_all(dir.path().join("other-project")).unwrap();
+    let (model, base_url) = FakeModel::start(vec![
+        // The turn taken outside Inline, before the import: a command, then
+        // the answer.
+        json!({"type": "function_call", "call_id": "call-ls", "name": "exec_command",
+            "arguments": json!({"cmd": "ls", "workdir": folder.display().to_string()}).to_string()}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "**E2E_OUTSIDE_ANSWER** fixed"}]}),
+        // The first turn in Inline.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_LIVE_ANSWER"}]}),
+        // Another turn outside Inline, after the import.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_OUTSIDE_LATER"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_LIVE_AGAIN"}]}),
+    ])
+    .await;
+    let codex_home = dir.path().join("codex-home");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "model_provider = \"inline_e2e\"\nmodel = \"gpt-5\"\napproval_policy = \"never\"\n\
+             sandbox_mode = \"read-only\"\nthread_unload_delay_secs = 1\n\n[model_providers.inline_e2e]\nname = \"Inline E2E\"\n\
+             base_url = \"{base_url}\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n\
+             supports_websockets = false\n"
+        ),
+    )
+    .unwrap();
+    // SAFETY: set before Codex starts.
+    unsafe { isolate_codex(&codex_home) };
+
+    // 1. A session made outside Inline.
+    let before = chrono::Utc::now().timestamp();
+    let thread =
+        codex_turn_outside_inline(&folder, None, "E2E_OUTSIDE_PROMPT fix the parser").await;
+    eprintln!("outside thread {thread}");
+
+    let owner = client(dir.path(), "owner", &env("INLINE_V2_E2E_OWNER_TOKEN")).await;
+    let bridge = CodexBridge {
+        dir: dir.path().to_path_buf(),
+        folder: folder.clone(),
+        owner: owner.clone(),
+        owner_user_id,
+        bot_user_id,
+        dm_chat_id,
+    };
+    let (stop, running, _bot) = bridge.start().await;
+
+    // 2. The picker lists it; its button opens it.
+    send(&owner, dm_chat_id, "/sessions").await;
+    let texts = wait_for(
+        &model,
+        &owner,
+        dm_chat_id,
+        bot_user_id,
+        "the picker",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("Open a Codex session"))
+        },
+    )
+    .await;
+    let (picker, picker_text) = texts
+        .iter()
+        .find(|(_, text)| text.contains("Open a Codex session"))
+        .cloned()
+        .unwrap();
+    assert!(picker_text.contains("E2E_OUTSIDE_PROMPT"), "{picker_text}");
+    invoke_action(&owner, dm_chat_id, picker, "v2-s0")
+        .await
+        .unwrap();
+    let texts = wait_for(
+        &model,
+        &owner,
+        dm_chat_id,
+        bot_user_id,
+        "the opened thread",
+        |texts| texts.iter().any(|(_, text)| text.contains("Opened")),
+    )
+    .await;
+    let opened = texts
+        .iter()
+        .find(|(_, text)| text.contains("Opened"))
+        .unwrap()
+        .1
+        .clone();
+    eprintln!("opened: {opened}");
+
+    // The thread the session opened in.
+    let thread_chat = {
+        let result = owner
+            .connect_agent_session(proto::ConnectAgentSessionInput {
+                bot_user_id,
+                provider: proto::AgentSessionProvider::Codex as i32,
+                instance_ref: "e2e-installation".to_owned(),
+                session_ref: thread.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        match result
+            .agent_session
+            .unwrap()
+            .peer_id
+            .unwrap()
+            .r#type
+            .unwrap()
+        {
+            proto::peer::Type::Chat(chat) => chat.chat_id,
+            other => panic!("unexpected peer {other:?}"),
+        }
+    };
+
+    // 3. Its whole conversation: the notice, the prompt as the owner, the
+    // answer as the bot, at the time they happened.
+    let messages = chat_messages(&owner, thread_chat).await;
+    eprintln!("imported: {messages:#?}");
+    assert!(messages.len() >= 3, "{messages:#?}");
+    assert_eq!(messages[0].1, bot_user_id);
+    assert!(
+        messages[0].3.contains("Imported from Codex"),
+        "{messages:#?}"
+    );
+    assert_eq!(messages[1].1, owner_user_id, "the prompt is the owner's");
+    assert!(messages[1].3.contains("E2E_OUTSIDE_PROMPT"));
+    assert!(messages[1].2 >= before - 5 && messages[1].2 <= chrono::Utc::now().timestamp());
+    assert_eq!(messages[2].1, bot_user_id, "the answer is the bot's");
+    assert!(
+        messages[2].3.contains("E2E_OUTSIDE_ANSWER"),
+        "{messages:#?}"
+    );
+    assert!(messages[2].3.contains("Ran 1 command"), "{messages:#?}");
+    assert!(
+        !messages[2].3.contains("**"),
+        "Markdown renders: {messages:#?}"
+    );
+
+    // Opening it again points at the same thread.
+    send(&owner, dm_chat_id, &format!("codex resume {thread}")).await;
+    wait_for(
+        &model,
+        &owner,
+        dm_chat_id,
+        bot_user_id,
+        "already open",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("already has this session"))
+        },
+    )
+    .await;
+
+    // 4. A message in the thread continues the same native session.
+    let before_live = model.request_count();
+    send(&owner, thread_chat, "E2E_LIVE_PROMPT keep going").await;
+    wait_for(
+        &model,
+        &owner,
+        thread_chat,
+        bot_user_id,
+        "the live answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_LIVE_ANSWER"))
+        },
+    )
+    .await;
+    let live_request = model.requests.lock().unwrap()[before_live].clone();
+    assert!(
+        live_request["input_text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("E2E_OUTSIDE_PROMPT"),
+        "the resumed session still has the outside conversation: {live_request:#?}"
+    );
+
+    // 5. Inline lets the session go; a turn in Codex comes in on its own.
+    send(&owner, thread_chat, "/release").await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    codex_turn_outside_inline(&folder, Some(&thread), "E2E_OUTSIDE_LATER_PROMPT").await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let messages = loop {
+        let messages = chat_messages(&owner, thread_chat).await;
+        if messages
+            .iter()
+            .any(|message| message.3.contains("E2E_OUTSIDE_LATER"))
+        {
+            break messages;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the outside turn never synced: {messages:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    eprintln!("caught up: {messages:#?}");
+    let live_prompts = messages
+        .iter()
+        .filter(|message| message.3.contains("E2E_LIVE_PROMPT"))
+        .count();
+    assert_eq!(
+        live_prompts, 1,
+        "Inline's own turn is not imported again: {messages:#?}"
+    );
+    let later = messages
+        .iter()
+        .position(|message| message.3.contains("E2E_OUTSIDE_LATER_PROMPT"))
+        .expect("the outside prompt");
+    assert_eq!(messages[later].1, owner_user_id);
+    assert!(messages[later + 1].3.contains("E2E_OUTSIDE_LATER"));
+
+    // And the thread goes on after it.
+    send(&owner, thread_chat, "E2E_LIVE_AGAIN_PROMPT").await;
+    wait_for(
+        &model,
+        &owner,
+        thread_chat,
+        bot_user_id,
+        "the next live answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_LIVE_AGAIN"))
+        },
+    )
+    .await;
+    let _ = stop.send(());
+    let _ = running.await;
+}
+
+/// Runs one turn of a Claude Code session outside Inline, as `claude -p`
+/// in the bridge's isolated config, and returns the session id.
+async fn claude_turn_outside_inline(
+    bridge: &ClaudeBridge,
+    resume: Option<&str>,
+    prompt: &str,
+) -> String {
+    let id = resume.map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_owned);
+    let mut command = tokio::process::Command::new(which("claude", "INLINE_V2_E2E_CLAUDE"));
+    command
+        .current_dir(&bridge.folder)
+        .arg("-p")
+        .arg(prompt)
+        .args(["--output-format", "json", "--model", "claude-sonnet-4-5"])
+        .args(["--permission-mode", "bypassPermissions"])
+        .env("ANTHROPIC_BASE_URL", &bridge.api_base_url)
+        .env("ANTHROPIC_API_KEY", "sk-ant-e2e-dummy")
+        .env("CLAUDE_CONFIG_DIR", &bridge.config_dir)
+        .env("DISABLE_AUTOUPDATER", "1")
+        .env("DISABLE_TELEMETRY", "1")
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        .env("DISABLE_ERROR_REPORTING", "1")
+        .kill_on_drop(true);
+    match resume {
+        Some(id) => command.args(["--resume", id]),
+        None => command.args(["--session-id", &id]),
+    };
+    let output = tokio::time::timeout(Duration::from_secs(120), command.output())
+        .await
+        .expect("claude -p finished in time")
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "claude -p failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    id
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the server side of the bridge v2 end-to-end test"]
+async fn claude_opens_a_session_from_the_machine() {
+    let _ = env_logger::builder()
+        .is_test(true)
+        .parse_filters("inline::bridge::v2=debug,inline_client=info")
+        .try_init();
+    let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
+    let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();
+    let dm_chat_id: i64 = env("INLINE_V2_E2E_DM_CHAT_ID").parse().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = std::fs::canonicalize(dir.path()).unwrap().join("project");
+    std::fs::create_dir_all(&folder).unwrap();
+    let api = fake_messages::FakeMessages::start().await;
+    let owner = client(dir.path(), "owner", &env("INLINE_V2_E2E_OWNER_TOKEN")).await;
+    let config_dir = dir.path().join("claude-config");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let bridge = ClaudeBridge {
+        dir: dir.path().to_owned(),
+        folder: folder.clone(),
+        config_dir,
+        api_base_url: api.base_url.clone(),
+        owner: owner.clone(),
+        owner_user_id,
+        bot_user_id,
+        dm_chat_id,
+    };
+
+    // 1. A session made outside Inline: a command, then the answer.
+    let before = chrono::Utc::now().timestamp();
+    let session = claude_turn_outside_inline(
+        &bridge,
+        None,
+        "E2E_OUTSIDE_PROMPT list the files\n@tool Bash {\"command\": \"ls\", \"description\": \"List files\"}",
+    )
+    .await;
+    eprintln!("outside session {session}");
+    let (stop, running, _bot) = bridge.start().await;
+
+    // 2. The owner pastes its resume command in the DM.
+    send(&owner, dm_chat_id, &format!("claude --resume {session}")).await;
+    let texts = wait_for(
+        &api,
+        &owner,
+        dm_chat_id,
+        bot_user_id,
+        "the opened thread",
+        |texts| texts.iter().any(|(_, text)| text.contains("Opened")),
+    )
+    .await;
+    eprintln!("opened: {texts:?}");
+    let thread_chat = {
+        let result = owner
+            .connect_agent_session(proto::ConnectAgentSessionInput {
+                bot_user_id,
+                provider: proto::AgentSessionProvider::Claude as i32,
+                instance_ref: "e2e-claude".to_owned(),
+                session_ref: session.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        match result
+            .agent_session
+            .unwrap()
+            .peer_id
+            .unwrap()
+            .r#type
+            .unwrap()
+        {
+            proto::peer::Type::Chat(chat) => chat.chat_id,
+            other => panic!("unexpected peer {other:?}"),
+        }
+    };
+    let messages = chat_messages(&owner, thread_chat).await;
+    eprintln!("imported: {messages:#?}");
+    assert!(
+        messages[0].3.contains("Imported from Claude Code"),
+        "{messages:#?}"
+    );
+    assert_eq!(messages[0].1, bot_user_id);
+    assert_eq!(messages[1].1, owner_user_id, "the prompt is the owner's");
+    assert!(
+        messages[1].3.starts_with("E2E_OUTSIDE_PROMPT"),
+        "{messages:#?}"
+    );
+    assert!(messages[1].2 >= before - 5);
+    assert_eq!(messages[2].1, bot_user_id);
+    assert!(messages[2].3.contains("FAKE-DONE"), "{messages:#?}");
+    assert!(messages[2].3.contains("Ran 1 command"), "{messages:#?}");
+
+    // 3. A message in the thread resumes the same session.
+    let served_before = api.served().len();
+    send(
+        &owner,
+        thread_chat,
+        "E2E_LIVE_PROMPT\n@text E2E_CLAUDE_LIVE",
+    )
+    .await;
+    wait_for(
+        &api,
+        &owner,
+        thread_chat,
+        bot_user_id,
+        "the live answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_LIVE"))
+        },
+    )
+    .await;
+    let resumed = api.served()[served_before..].iter().any(|served| {
+        served.body["messages"]
+            .to_string()
+            .contains("E2E_OUTSIDE_PROMPT")
+    });
+    assert!(
+        resumed,
+        "the resumed session still has the outside conversation"
+    );
+
+    // 4. Inline lets it go; a turn in the terminal comes in on its own,
+    // and Inline's own turn is not imported again.
+    send(&owner, thread_chat, "/release").await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    claude_turn_outside_inline(
+        &bridge,
+        Some(&session),
+        "E2E_OUTSIDE_LATER_PROMPT\n@text E2E_CLAUDE_LATER",
+    )
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let messages = loop {
+        let messages = chat_messages(&owner, thread_chat).await;
+        if messages
+            .iter()
+            .any(|message| message.3.contains("E2E_CLAUDE_LATER"))
+        {
+            break messages;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the outside turn never synced: {messages:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    eprintln!("caught up: {messages:#?}");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.3.contains("E2E_LIVE_PROMPT"))
+            .count(),
+        1,
+        "{messages:#?}"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.1 == bot_user_id && message.3.contains("E2E_CLAUDE_LIVE"))
+            .count(),
+        1,
+        "{messages:#?}"
+    );
+    let later = messages
+        .iter()
+        .position(|message| message.3.contains("E2E_OUTSIDE_LATER_PROMPT"))
+        .unwrap();
+    assert_eq!(messages[later].1, owner_user_id);
+
+    // 5. The thread goes on.
+    send(&owner, thread_chat, "next\n@text E2E_CLAUDE_AGAIN").await;
+    wait_for(
+        &api,
+        &owner,
+        thread_chat,
+        bot_user_id,
+        "the next live answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_AGAIN"))
+        },
+    )
+    .await;
+    let _ = stop.send(());
+    let _ = running.await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs the server side of the bridge v2 end-to-end test"]
 async fn claude_round_trip_through_inline() {

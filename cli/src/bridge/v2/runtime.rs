@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use futures_util::FutureExt as _;
 use inline_agent_bridge::HostToolResult;
-use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
     AddresseeKind, ContextAuthorRole, ContextMessage, Conversation,
     DEFAULT_DAILY_SPEAK_GATE_BUDGET, DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey,
@@ -24,6 +23,8 @@ use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
     OutputMode, RuntimeHealth, SettingsChange, SetupReason, UserId,
 };
+use inline_agent_bridge::harness::{SessionQuery, SessionSummary};
+use inline_agent_bridge::{ProviderSessionId, SessionPageCursor};
 use inline_client::store::ClientStore;
 use inline_client::{
     AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotCapability,
@@ -62,6 +63,11 @@ use super::workspaces::{self, NO_PROJECT_ID};
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
 /// How long the harness's pickers are reused.
 const CATALOG_TTL: Duration = Duration::from_secs(60);
+/// How often idle imported threads catch up with their native sessions.
+#[cfg(not(test))]
+const IMPORT_CATCH_UP: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const IMPORT_CATCH_UP: Duration = Duration::from_secs(3);
 /// How long heartbeats reuse the harness's listing before asking again.
 const CAPABILITIES_REFRESH: Duration = Duration::from_secs(600);
 const NO_ACCESS: &str = "You don't have access to do that with this agent.";
@@ -390,6 +396,10 @@ pub(crate) struct Runtime {
     /// Chat → whether Inline knows a session for its work, for threads with
     /// no work running here yet. A session keeps its folder.
     known_sessions: HashMap<i64, bool>,
+    /// Sessions each picker card listed, and the cursor of its next page.
+    pickers: HashMap<i64, (Vec<SessionSummary>, Option<SessionPageCursor>)>,
+    /// When idle imported threads last caught up with their native session.
+    last_catch_up: Option<Instant>,
     /// The harness's pickers, refreshed now and then.
     catalog: Option<(tokio::time::Instant, Catalog)>,
     /// Thread listings for harnesses whose commands depend on the folder.
@@ -562,6 +572,8 @@ impl Runtime {
             bound_configs,
             bound_projects: HashMap::new(),
             known_sessions: HashMap::new(),
+            pickers: HashMap::new(),
+            last_catch_up: None,
             catalog: None,
             chat_catalogs: HashMap::new(),
             catalog_refreshing: HashMap::new(),
@@ -710,6 +722,7 @@ impl Runtime {
                 _ = connection.tick() => {
                     let started = Instant::now();
                     self.keep_connected().await;
+                    self.catch_up_idle_imports();
                     // A harness that needs setup shows in the apps right away.
                     if self.reported_health.as_ref() != Some(&self.agent.harness.describe().health) {
                         self.beat(true);
@@ -1043,6 +1056,24 @@ impl Runtime {
                     Ok(ActionData::Task { start }) => {
                         self.on_task(chat_id.get(), message_id.get(), actor_user_id.get(), start)
                             .await
+                    }
+                    Ok(ActionData::OpenSession { s }) => {
+                        self.on_open_session(
+                            chat_id.get(),
+                            message_id.get(),
+                            actor_user_id.get(),
+                            &s,
+                        )
+                        .await
+                    }
+                    Ok(ActionData::MoreSessions { o }) => {
+                        self.on_more_sessions(
+                            chat_id.get(),
+                            message_id.get(),
+                            actor_user_id.get(),
+                            o,
+                        )
+                        .await
                     }
                     Ok(ActionData::NextStep { l }) => {
                         self.on_next_step(
@@ -3095,8 +3126,50 @@ impl Runtime {
             }
             self.agent.ledger.set(&id, InputState::Consumed)?;
         }
+        // The owner pasting a session's link or id in the DM opens it here.
+        // A bare id that names no session here is an ordinary message.
+        if group.command().is_none()
+            && self.picker_refusal(chat_id, group.author.user_id).is_none()
+            && let Some(pasted) = super::import::pasted_session(&group.text, self.config.vocabulary)
+        {
+            let summary = match pasted.explicit {
+                true => None,
+                false => match ProviderSessionId::new(pasted.id.clone()) {
+                    Ok(session) => match tokio::time::timeout(
+                        Duration::from_secs(10),
+                        self.agent.harness.session(&session),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Some(summary))) => Some(summary),
+                        _ => None,
+                    },
+                    Err(_) => None,
+                },
+            };
+            if pasted.explicit || summary.is_some() {
+                let key = input_id(self.config.bot_user_id, chat_id, group.message_id, "open");
+                if let Begin::New { .. } = self.agent.ledger.begin(
+                    &key,
+                    chat_id,
+                    group.message_id,
+                    group.author.user_id,
+                )? {
+                    self.agent.ledger.set(&key, InputState::Consumed)?;
+                    if let Err(answer) = self
+                        .open_native(&pasted.id, summary, group.message_id)
+                        .await
+                    {
+                        self.reply_markdown(chat_id, group.message_id, &answer)
+                            .await;
+                    }
+                }
+                return Ok(());
+            }
+        }
         let control = match group.command().map(|(name, _)| name) {
             Some("new") => return self.new_thread(group, grants, participation).await,
+            Some("sessions") => return self.sessions_picker(group).await,
             Some("stop") => Some(Control::Stop),
             Some("pause") => Some(Control::Pause),
             Some("resume") => Some(Control::Resume),
@@ -3642,6 +3715,415 @@ impl Runtime {
             .map(|workspace| workspace.path)
             .filter(|path| path.is_dir());
         Some((native, folder))
+    }
+
+    /// `/sessions`: the owner's native sessions on this machine, newest
+    /// first, each a button that opens it here with its whole conversation.
+    async fn sessions_picker(
+        &mut self,
+        group: &GroupMessage,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(refusal) = self.picker_refusal(group.chat_id, group.author.user_id) {
+            self.reply(group.chat_id, group.message_id, &refusal).await;
+            return Ok(());
+        }
+        let page = match self.session_page(None).await {
+            Ok(page) => page,
+            Err(error) => {
+                self.reply(group.chat_id, group.message_id, &error).await;
+                return Ok(());
+            }
+        };
+        let (doc, actions) = super::import::picker(
+            self.config.vocabulary,
+            &page.sessions,
+            0,
+            page.next.is_some(),
+            now_seconds(),
+        );
+        match api::send_doc(
+            &self.agent.bot,
+            group.chat_id,
+            Some(group.message_id),
+            &doc,
+            actions,
+            Notify::Normal,
+        )
+        .await
+        {
+            Ok(message_id) => {
+                self.agent.sent.lock().expect("sent").insert(message_id);
+                self.pickers.insert(message_id, (page.sessions, page.next));
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "session picker failed: {error}")
+            }
+        }
+        Ok(())
+    }
+
+    /// Why this person cannot open native sessions here, if they cannot:
+    /// sessions are the owner's own work on this machine, opened from the DM.
+    fn picker_refusal(&self, chat_id: i64, actor: i64) -> Option<String> {
+        if actor != self.config.owner_user_id {
+            return Some(format!(
+                "Only {}'s owner can open sessions from this machine.",
+                self.config.agent_name
+            ));
+        }
+        if chat_id != self.config.dm_chat_id {
+            return Some(format!(
+                "Send /sessions in your DM with {} to open a session from this machine.",
+                self.config.agent_name
+            ));
+        }
+        if !matches!(
+            self.config.vocabulary,
+            Vocabulary::Claude | Vocabulary::Codex
+        ) {
+            return Some(format!(
+                "Opening sessions from this machine isn't available with {}.",
+                self.config.agent_name
+            ));
+        }
+        None
+    }
+
+    async fn session_page(
+        &self,
+        cursor: Option<SessionPageCursor>,
+    ) -> Result<inline_agent_bridge::harness::SessionPage, String> {
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            self.agent.harness.sessions(SessionQuery {
+                folder: None,
+                archived: false,
+                cursor,
+                limit: Some(super::import::PICKER_PAGE),
+            }),
+        )
+        .await
+        .map_err(|_| {
+            format!(
+                "{} took too long to list its sessions. Try again.",
+                self.config.vocabulary.product()
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "Couldn't list {} sessions: {error}",
+                self.config.vocabulary.product()
+            )
+        })
+    }
+
+    async fn on_more_sessions(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        offset: usize,
+    ) -> Option<String> {
+        if let Some(refusal) = self.picker_refusal(chat_id, actor) {
+            return Some(refusal);
+        }
+        // After a restart the cursor is gone; Claude's is the offset itself.
+        let cursor = match self.pickers.get(&message_id) {
+            Some((_, next)) => next.clone(),
+            None => SessionPageCursor::new(offset.to_string()).ok(),
+        };
+        let page = match self.session_page(cursor).await {
+            Ok(page) => page,
+            Err(error) => return Some(error),
+        };
+        let (doc, actions) = super::import::picker(
+            self.config.vocabulary,
+            &page.sessions,
+            offset,
+            page.next.is_some(),
+            now_seconds(),
+        );
+        if let Err(error) = api::edit_doc(&self.agent.bot, chat_id, message_id, &doc, actions).await
+        {
+            return Some(format!("Couldn't show more sessions: {error}"));
+        }
+        self.pickers.insert(message_id, (page.sessions, page.next));
+        None
+    }
+
+    async fn on_open_session(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        id: &str,
+    ) -> Option<String> {
+        if let Some(refusal) = self.picker_refusal(chat_id, actor) {
+            return Some(refusal);
+        }
+        let summary = self
+            .pickers
+            .get(&message_id)
+            .and_then(|(sessions, _)| {
+                sessions
+                    .iter()
+                    .find(|session| session.key.session.as_str() == id)
+            })
+            .cloned();
+        if let Err(answer) = self.open_native(id, summary, message_id).await {
+            self.reply_markdown(chat_id, message_id, &answer).await;
+        }
+        None
+    }
+
+    /// Opens native session `id` from this machine in a new thread under the
+    /// DM, with its whole conversation, and says where.
+    async fn open_native(
+        &mut self,
+        id: &str,
+        summary: Option<SessionSummary>,
+        reply_to: i64,
+    ) -> Result<(), String> {
+        let product = self.config.vocabulary.product();
+        let Ok(session) = ProviderSessionId::new(id.to_owned()) else {
+            return Err(format!("That isn't a {product} session id."));
+        };
+        let summary = match summary {
+            Some(summary) => summary,
+            None => match self.agent.harness.session(&session).await {
+                Ok(Some(summary)) => summary,
+                Ok(None) => {
+                    return Err(format!(
+                        "There's no {product} session `{id}` on this machine."
+                    ));
+                }
+                Err(error) => return Err(format!("Couldn't find that {product} session: {error}")),
+            },
+        };
+        let title = super::import::session_title(&summary);
+        // A session Inline already has opens where it is.
+        if let Some(chat_id) = self.thread_of(&session).await {
+            return Err(format!(
+                "[{}](inline://chat?id={chat_id}) already has this session.",
+                link_text(&title)
+            ));
+        }
+        let Some(folder) = super::import::session_folder(&summary) else {
+            return Err(match &summary.folder {
+                Some(folder) => format!(
+                    "This session's folder, `{}`, isn't on this machine.",
+                    folder.display()
+                ),
+                None => format!(
+                    "{product} doesn't say which folder this session works in, so it can't open here."
+                ),
+            });
+        };
+        let created = match self
+            .agent
+            .bot
+            .create_reply_thread(CreateReplyThreadRequest {
+                parent_chat_id: InlineId::new(self.config.dm_chat_id),
+                parent_message_id: None,
+                title: Some(title.clone()),
+                description: None,
+                emoji: None,
+                participants: Vec::new(),
+                agent_context: None,
+            })
+            .await
+        {
+            Ok(created) => created,
+            Err(error) => return Err(format!("Couldn't make a thread for it: {error}")),
+        };
+        let chat_id = created.chat_id.get();
+        self.own_threads.insert(chat_id, true);
+        self.set_thread_folder(chat_id, folder.clone());
+        let connected = self
+            .agent
+            .owner
+            .connect(proto::ConnectAgentSessionInput {
+                peer_id: Some(chat_peer(chat_id)),
+                bot_user_id: self.config.bot_user_id,
+                provider: self.agent.provider as i32,
+                instance_ref: self.config.installation_id.clone(),
+                session_ref: session.to_string(),
+                workspace_label: Some(workspaces::label(&folder)),
+                ..Default::default()
+            })
+            .await;
+        let agent_session_id = match connected {
+            Ok(result)
+                if result.state == proto::ConnectAgentSessionState::ConnectedElsewhere as i32 =>
+            {
+                return Err(
+                    "Inline gave this session to another thread while this one was being made."
+                        .to_owned(),
+                );
+            }
+            Ok(result) => match result.agent_session.map(|session| session.id) {
+                Some(id) => id,
+                None => return Err("Inline did not record the session.".to_owned()),
+            },
+            Err(error) => return Err(format!("Couldn't record the session: {error}")),
+        };
+        if let Err(error) =
+            self.agent
+                .ledger
+                .begin_import(chat_id, session.as_str(), agent_session_id)
+        {
+            log::warn!(target: "inline::bridge::v2", "import record failed chat={chat_id}: {error}");
+        }
+        let link = format!("[{}](inline://chat?id={chat_id})", link_text(&title));
+        // The work resumes the session on the first message here, after the
+        // import (one pass at a time per thread).
+        let mode = self.effective_mode(None);
+        self.works.insert(
+            chat_id,
+            super::work::spawn(
+                self.agent.clone(),
+                chat_id,
+                Known {
+                    agent_session_id: Some(agent_session_id),
+                    native: Some(session),
+                    ..Known::default()
+                },
+                mode,
+                self.thread_settings
+                    .get(&chat_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
+        );
+        // A long conversation takes a moment; the bridge keeps answering.
+        let agent = self.agent.clone();
+        tokio::spawn(async move {
+            let imported = super::import::pass(&agent, chat_id, Some(&folder)).await;
+            let answer = match imported {
+                Ok(_) => format!("Opened {link} with its conversation. Continue it there."),
+                Err(error) => {
+                    log::warn!(target: "inline::bridge::v2", "import failed chat={chat_id}: {error}");
+                    format!(
+                        "Opened {link}, but its conversation is still coming in ({error}). It finishes when the thread picks up."
+                    )
+                }
+            };
+            match api::send_doc(
+                &agent.bot,
+                agent.dm_chat_id,
+                Some(reply_to),
+                &super::doc::Doc::markdown(&answer),
+                None,
+                Notify::Normal,
+            )
+            .await
+            {
+                Ok(id) => {
+                    agent.sent.lock().expect("sent").insert(id);
+                }
+                Err(error) => {
+                    log::warn!(target: "inline::bridge::v2", "open reply failed: {error}")
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// The thread that already has this native session, by this bridge's
+    /// record or Inline's.
+    async fn thread_of(&self, session: &ProviderSessionId) -> Option<i64> {
+        if let Ok(Some(record)) = self.agent.ledger.import_by_session(session.as_str()) {
+            return Some(record.chat_id);
+        }
+        let result = self
+            .agent
+            .owner
+            .connect(proto::ConnectAgentSessionInput {
+                peer_id: None,
+                bot_user_id: self.config.bot_user_id,
+                provider: self.agent.provider as i32,
+                instance_ref: self.config.installation_id.clone(),
+                session_ref: session.to_string(),
+                ..Default::default()
+            })
+            .await
+            .ok()?;
+        match result.agent_session?.peer_id?.r#type? {
+            proto::peer::Type::Chat(chat) => Some(chat.chat_id),
+            proto::peer::Type::User(_) => None,
+        }
+    }
+
+    /// Imported threads that are idle catch up with turns taken in the
+    /// native app since, so they read in order when someone comes back.
+    fn catch_up_idle_imports(&mut self) {
+        if self
+            .last_catch_up
+            .is_some_and(|last| last.elapsed() < IMPORT_CATCH_UP)
+        {
+            return;
+        }
+        self.last_catch_up = Some(Instant::now());
+        let Ok(imports) = self.agent.ledger.imports() else {
+            return;
+        };
+        let idle: Vec<_> = imports
+            .into_iter()
+            .filter(|record| {
+                self.works.get(&record.chat_id).is_none_or(|work| {
+                    work.task.is_finished()
+                        || matches!(*work.phase.borrow(), WorkPhase::None | WorkPhase::Idle)
+                })
+            })
+            .map(|record| {
+                (
+                    record.clone(),
+                    self.thread_settings
+                        .get(&record.chat_id)
+                        .and_then(|settings| settings.folder.clone()),
+                )
+            })
+            .collect();
+        if idle.is_empty() {
+            return;
+        }
+        let agent = self.agent.clone();
+        tokio::spawn(async move {
+            for (record, folder) in idle {
+                let pass = tokio::time::timeout(
+                    Duration::from_secs(60),
+                    super::import::pass(&agent, record.chat_id, folder.as_deref()),
+                )
+                .await;
+                match pass {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => {
+                        log::warn!(target: "inline::bridge::v2", "import catch-up failed chat={}: {error}", record.chat_id)
+                    }
+                    Err(_) => {
+                        log::warn!(target: "inline::bridge::v2", "slow step=import_catch_up chat={}", record.chat_id)
+                    }
+                }
+            }
+        });
+    }
+
+    async fn reply_markdown(&self, chat_id: i64, message_id: i64, text: &str) {
+        match api::send_doc(
+            &self.agent.bot,
+            chat_id,
+            Some(message_id),
+            &super::doc::Doc::markdown(text),
+            None,
+            Notify::Normal,
+        )
+        .await
+        {
+            Ok(id) => {
+                self.agent.sent.lock().expect("sent").insert(id);
+            }
+            Err(error) => log::warn!(target: "inline::bridge::v2", "reply failed: {error}"),
+        }
     }
 
     /// `/new`: a new Inline thread under this chat with a fresh native session.
@@ -4999,6 +5481,18 @@ fn widget_call_refusal(decision: Option<IntakeDecision>) -> &'static str {
     }
 }
 
+/// Text for a Markdown link label.
+fn link_text(text: &str) -> String {
+    text.replace(['[', ']'], "")
+}
+
+fn now_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or_default()
+}
+
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
@@ -5039,6 +5533,7 @@ fn mentioned_users(message: &GroupMessage) -> Vec<i64> {
 /// names are not forwarded.
 pub(super) const INLINE_COMMANDS: &[&str] = &[
     "new",
+    "sessions",
     "stop",
     "pause",
     "resume",
@@ -5126,6 +5621,12 @@ fn help_text(agent_name: &str, vocabulary: Vocabulary, acp: bool) -> String {
         }
         Vocabulary::Amp => unreachable!("ACP providers have capability-limited help above"),
     };
+    let sessions = match vocabulary {
+        Vocabulary::Codex | Vocabulary::Claude => {
+            "/sessions · open a session from this machine here, with its whole conversation (or paste its link or id)\n"
+        }
+        _ => "",
+    };
     format!(
         "{agent_name} commands:\n\
          /status · what I'm doing, my model and folder\n\
@@ -5134,6 +5635,7 @@ fn help_text(agent_name: &str, vocabulary: Vocabulary, acp: bool) -> String {
          /queue <message> · run it after the current turn\n\
          /compact, /clear · shrink or reset the session's context\n\
          /new <task> · a new thread with a fresh session\n\
+         {sessions}\
          /follow, /unfollow · answer every message in this thread, or only mentions and replies\n\
          /share @name, /unshare @name · who may use me (owner)\n\
          /release · let the session go; /terminal · continue it in a terminal\n\
