@@ -5,6 +5,7 @@ import InlineMacUI
 import InlineUI
 import Logger
 import RealtimeV2
+import SwiftUI
 
 /// Reacting to a message: the quick suggestions and the add/remove toggle. Shared by the reaction
 /// overlay and the reactions bar above the message context menu, so both suggest and send the same way.
@@ -72,24 +73,18 @@ enum MessageReactionActions {
     return true
   }
 
-  /// The reactions bar for a message's context menu: the overlay's quick reactions, the user's own
-  /// reactions marked, and + opening the full picker over the message.
-  static func contextMenuAccessory(for fullMessage: FullMessage, messageView: NSView) -> NSView {
-    let suggestions = suggestions(for: fullMessage)
-    let bar = ReactionBarAccessoryView(
-      emoji: Array(suggestions.displayed.prefix(7)),
-      chosen: chosenEmojis(on: fullMessage)
-    )
-    bar.onPick = { emoji in
-      toggle(emoji, on: fullMessage, messageEmojis: suggestions.messageEmojis)
-      ContextMenu.current?.close(animated: true, reason: .action)
-    }
-    bar.onMore = { [weak messageView] in
-      ContextMenu.current?.close(animated: true, reason: .action)
-      guard let messageView else { return }
-      messageView.window?.makeKey()
-      ReactionOverlayWindow.show(messageView: messageView, fullMessage: fullMessage, opensEmojiPicker: true)
-    }
-    return bar
+  /// Where the reactions bar sits: 10 pt above the menu, its trailing edge past the menu's, as
+  /// Telegram macOS places its reactions over its menu.
+  static let contextMenuAccessoryConfiguration = ContextMenuAccessoryConfiguration(
+    location: .above,
+    alignment: .trailing,
+    spacing: 10,
+    offset: 30
+  )
+
+  /// The reactions bar for a message's context menu: the same strip as the reaction overlay, on the
+  /// menu's glass. + closes the menu and opens the full picker from the bar, where it is.
+  static func contextMenuAccessory(for fullMessage: FullMessage) -> NSView {
+    MessageReactionAccessoryView(fullMessage: fullMessage)
   }
 }

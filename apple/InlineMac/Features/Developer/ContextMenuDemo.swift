@@ -9,7 +9,8 @@ import InlineMacUI
 /// It goes through AppKit's own right-click path (a right-mouse-down sent to the window, so hit testing,
 /// `menu(for:)` and the text view delegates run as for a real click), then walks a timeline the capture
 /// script follows: light idle (2 s), light with a row highlighted (4 s), closed (6 s), dark idle (7 s),
-/// dark highlighted (9 s), closed (11 s). Each step is logged to `tmp/context-menu-demo/steps.log` in the
+/// dark highlighted (9 s), then + in the reactions bar from the keyboard (11 s: the menu closes and the
+/// full picker opens from the bar), done (14 s). Each step is logged to `tmp/context-menu-demo/steps.log` in the
 /// app container with the menu and window frames.
 @MainActor
 enum ContextMenuDemo {
@@ -47,8 +48,10 @@ enum ContextMenuDemo {
           opened = open(index: index, appearance: appearance)
         case _ where opened && t >= 9 && t < 11:
           highlight()
-        case _ where t >= 11:
-          ContextMenu.current?.close(animated: false)
+        case _ where opened && t >= 11 && t < 14:
+          openMoreReactions()
+          opened = false
+        case _ where t >= 14:
           record("done")
           timer.invalidate()
         default:
@@ -107,6 +110,27 @@ enum ContextMenuDemo {
       }
     }
     record("highlight \(session.highlightedItem?.title ?? "nil")")
+  }
+
+  /// Up from the first row into the reactions bar, along to +, Return.
+  private static func openMoreReactions() {
+    guard let session = ContextMenu.current, let window = NSApp.mainWindow ?? NSApp.keyWindow else { return }
+    func press(_ keyCode: UInt16, _ characters: String = "", times: Int = 1) {
+      for _ in 0 ..< times {
+        if let key = NSEvent.keyEvent(
+          with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+          windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters,
+          isARepeat: false, keyCode: keyCode
+        ) {
+          _ = session.handle(key)
+        }
+      }
+    }
+    press(126, times: 6) // Up, into the bar
+    let inBar = session.accessoryHasKeyboardFocus
+    press(124, times: 60) // Right, to +
+    press(36, "\r") // Return
+    record("more reactions inBar=\(inBar) menuOpen=\(session.isOpen) windows=\(NSApp.windows.filter(\.isVisible).map { "\(type(of: $0)) \(describe($0.frame))" }.joined(separator: " | "))")
   }
 
   private static func messageViews(in view: NSView) -> [NSView] {

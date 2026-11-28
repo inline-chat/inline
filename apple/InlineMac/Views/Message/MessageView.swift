@@ -4710,11 +4710,12 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     let regularMessage = message.status != .sending && message.status != .failed
 
-    // Reactions live in the bar above the menu (+ opens the full picker).
+    // Reactions live in the bar above the menu (+ opens the full picker in place).
     if regularMessage {
+      menu.options.accessoryConfiguration = MessageReactionActions.contextMenuAccessoryConfiguration
       menu.accessoryViewProvider = { [weak self] in
         guard let self else { return nil }
-        return MessageReactionActions.contextMenuAccessory(for: fullMessage, messageView: self)
+        return MessageReactionActions.contextMenuAccessory(for: fullMessage)
       }
     }
 
@@ -4731,7 +4732,6 @@ extension MessageViewAppKit: NSMenuDelegate {
     if regularMessage, !isAnchorMessage {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
-      replyItem.contextMenuIconEffect = .wiggleLeft
       answerItems.append(replyItem)
 
       // Quote is offered only while part of this message is selected.
@@ -4751,13 +4751,11 @@ extension MessageViewAppKit: NSMenuDelegate {
         systemSymbolName: "arrowshape.turn.up.left.circle",
         accessibilityDescription: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread"
       )
-      replyInThreadItem.contextMenuIconEffect = .wiggleLeft
       answerItems.append(replyInThreadItem)
 
       if !message.isSubthreadPlacement {
         let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
         forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
-        forwardItem.contextMenuIconEffect = .wiggleRight
         if ExperimentalFeatureFlags.quickForwardEnabled, let dependencies,
            dependencies.forwardMessages != nil {
           forwardItem.submenu = ForwardMessageMenu.make(messages: props.album?.items ?? [fullMessage], dependencies: dependencies)
@@ -4803,7 +4801,6 @@ extension MessageViewAppKit: NSMenuDelegate {
       copyLinkItem.target = self
       copyLinkItem.representedObject = linkURL
       copyLinkItem.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Copy Link")
-      copyLinkItem.contextMenuIconEffect = .wiggleClockwise
       copyItems.append(copyLinkItem)
     }
 
@@ -4819,7 +4816,6 @@ extension MessageViewAppKit: NSMenuDelegate {
         systemSymbolName: "link",
         accessibilityDescription: "Copy Message Link"
       )
-      copyMessageLinkItem.contextMenuIconEffect = .wiggleClockwise
       copyItems.append(copyMessageLinkItem)
     }
 
@@ -4839,7 +4835,6 @@ extension MessageViewAppKit: NSMenuDelegate {
       saveItem.target = photoView
       saveItem.isEnabled = true
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Image")
-      saveItem.contextMenuIconEffect = .bounceDown
       addSection([saveItem])
     }
 
@@ -4859,7 +4854,6 @@ extension MessageViewAppKit: NSMenuDelegate {
       saveItem.target = videoView
       saveItem.isEnabled = true
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Video")
-      saveItem.contextMenuIconEffect = .bounceDown
       videoItems.append(saveItem)
 
       if videoView.canSaveAsGIF {
@@ -4871,7 +4865,6 @@ extension MessageViewAppKit: NSMenuDelegate {
         saveGIFItem.target = videoView
         saveGIFItem.isEnabled = true
         saveGIFItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save GIF")
-        saveGIFItem.contextMenuIconEffect = .bounceDown
         videoItems.append(saveGIFItem)
       }
       addSection(videoItems)
@@ -4893,7 +4886,6 @@ extension MessageViewAppKit: NSMenuDelegate {
       let saveItem = NSMenuItem(title: "Save Audio", action: #selector(saveAudio), keyEquivalent: "s")
       saveItem.target = self
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Audio")
-      saveItem.contextMenuIconEffect = .bounceDown
       addSection([saveItem])
     }
 
@@ -4904,7 +4896,6 @@ extension MessageViewAppKit: NSMenuDelegate {
     {
       let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
       editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
-      editItem.contextMenuIconEffect = .wiggleClockwise
       changeItems.append(editItem)
     }
 
@@ -4917,7 +4908,6 @@ extension MessageViewAppKit: NSMenuDelegate {
         systemSymbolName: pinned ? "pin.slash" : "pin",
         accessibilityDescription: pinTitle
       )
-      pinItem.contextMenuIconEffect = .bounceDown
       changeItems.append(pinItem)
     }
 
@@ -4986,7 +4976,6 @@ extension MessageViewAppKit: NSMenuDelegate {
       let resendItem = NSMenuItem(title: "Resend", action: #selector(resendMessage), keyEquivalent: "")
       resendItem.target = self
       resendItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Resend")
-      resendItem.contextMenuIconEffect = .rotate
       destructiveItems.append(resendItem)
     }
 
@@ -5002,7 +4991,6 @@ extension MessageViewAppKit: NSMenuDelegate {
       deleteItem.target = self
       deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete")
       deleteItem.contextMenuStyle = .destructive
-      deleteItem.contextMenuIconEffect = .wiggleClockwise
       destructiveItems.append(deleteItem)
     }
     addSection(destructiveItems)

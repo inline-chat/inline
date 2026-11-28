@@ -1,9 +1,9 @@
 import Auth
 import InlineKit
-import InlineUI
-import Logger
 import SwiftUI
 
+/// The reaction picker over a message (hover quick action): the shared `ReactionStrip` on its own
+/// material, with + opening the full picker above it.
 struct ReactionOverlayView: View {
   static let shadowPadding: CGFloat = 5
 
@@ -11,31 +11,24 @@ struct ReactionOverlayView: View {
   let onDismiss: () -> Void
   let onEmojiPickerActiveChanged: (Bool) -> Void
   let onEmojiPickerDismissed: () -> Void
-  /// Open with the full emoji picker showing, for the + of the context menu's reactions bar.
-  var opensEmojiPicker = false
 
-  private static let log = Log.scoped("ReactionOverlayView")
-
-  // State for hover and animation
-  @State private var isHovered: [String: Bool] = [:]
-  @State private var suggestedReactions = ReactionPickerEmojiUsageStore.suggestedEmojis()
-  @State private var suggestionCounts = ReactionPickerEmojiUsageStore.usageCounts()
-  @State private var suggestionSources: [String: String] = [:]
-  @State private var messageReactions: Set<String> = []
+  @StateObject private var model: ReactionStripModel
   @State private var appearScale: CGFloat = 0.5
   @State private var appearOpacity: Double = 0
-  @State private var isEmojiPickerPresented = false
-  @State private var isSelectingCustomEmoji = false
-  @State private var scrollEdges = ScrollEdges(leading: false, trailing: true)
 
   private let pageWidth: CGFloat = 280 // Width of one page of reactions
-  private static let buttonSize: CGFloat = 32
-  private static let moreReactionsKey = "__more_reactions"
-  private static let edgeFadeWidth: CGFloat = 20
 
-  private struct ScrollEdges: Equatable {
-    var leading: Bool
-    var trailing: Bool
+  init(
+    fullMessage: FullMessage,
+    onDismiss: @escaping () -> Void,
+    onEmojiPickerActiveChanged: @escaping (Bool) -> Void,
+    onEmojiPickerDismissed: @escaping () -> Void
+  ) {
+    self.fullMessage = fullMessage
+    self.onDismiss = onDismiss
+    self.onEmojiPickerActiveChanged = onEmojiPickerActiveChanged
+    self.onEmojiPickerDismissed = onEmojiPickerDismissed
+    _model = StateObject(wrappedValue: ReactionStripModel(fullMessage: fullMessage))
   }
 
   private func handleReactionSelected(_ emoji: String) {
@@ -43,65 +36,18 @@ struct ReactionOverlayView: View {
       onDismiss()
       return
     }
-    MessageReactionActions.toggle(emoji, on: fullMessage, messageEmojis: messageReactions)
-    reloadSuggestedReactions()
+    MessageReactionActions.toggle(emoji, on: fullMessage, messageEmojis: model.messageEmojis)
+    model.reload()
     onDismiss()
   }
 
-  private func showEmojiPicker() {
-    isSelectingCustomEmoji = false
-    isEmojiPickerPresented = true
-  }
-
-  private func handleCustomEmojiSelected(_ value: String) {
-    isSelectingCustomEmoji = true
-    isEmojiPickerPresented = false
-    handleReactionSelected(AppSettings.shared.preferredEmojiSkinTone.applying(to: value))
-  }
-
-  private func removeSuggestion(_ emoji: String) {
-    ReactionPickerEmojiUsageStore.removeSuggestion(suggestionSources[emoji] ?? emoji)
-
-    withAnimation(.smoothSnappy) {
-      reloadSuggestedReactions()
-    }
-  }
-
-  private func reloadSuggestedReactions() {
-    let suggestions = MessageReactionActions.suggestions(for: fullMessage)
-    suggestionCounts = suggestions.usageCounts
-    suggestionSources = suggestions.sources
-    messageReactions = suggestions.messageEmojis
-    suggestedReactions = suggestions.displayed
-  }
-
   var body: some View {
-    // The plus stays pinned outside the scroller so it is always visible, like iOS.
-    HStack(spacing: 2) {
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 2) {
-          ForEach(suggestedReactions, id: \.self) { emoji in
-            reactionButton(emoji)
-          }
-        }
-        .padding(.leading, 6)
-      }
-      .onScrollGeometryChange(for: ScrollEdges.self) { geometry in
-        let minOffset = -geometry.contentInsets.leading
-        let maxOffset = geometry.contentSize.width + geometry.contentInsets.trailing - geometry.containerSize.width
-        return ScrollEdges(
-          leading: geometry.contentOffset.x > minOffset + 1,
-          trailing: geometry.contentOffset.x < maxOffset - 1
-        )
-      } action: { _, edges in
-        scrollEdges = edges
-      }
-      .mask(edgeFadeMask)
-
-      moreReactionsButton
-        .padding(.trailing, 6)
-    }
-    .padding(.vertical, 2)
+    ReactionStrip(
+      model: model,
+      pickerEdge: .maxY,
+      onPick: handleReactionSelected,
+      onPickerDismissed: onEmojiPickerDismissed
+    )
     .background(
       RoundedRectangle(cornerRadius: 20)
         .fill(.ultraThinMaterial)
@@ -111,118 +57,15 @@ struct ReactionOverlayView: View {
     .scaleEffect(appearScale)
     .opacity(appearOpacity)
     .onAppear {
-      reloadSuggestedReactions()
+      model.reload()
       withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
         appearScale = 1.0
         appearOpacity = 1.0
       }
-      if opensEmojiPicker {
-        // After the first layout, so the picker anchors to the + button.
-        DispatchQueue.main.async { showEmojiPicker() }
-      }
     }
-    .onDisappear {
-      isHovered.removeAll()
-    }
-    .onChange(of: isEmojiPickerPresented) { wasPresented, isPresented in
+    .onChange(of: model.isEmojiPickerPresented) { _, isPresented in
       onEmojiPickerActiveChanged(isPresented)
-      if isPresented {
-        isHovered[Self.moreReactionsKey] = false
-      }
-      guard wasPresented, !isPresented else { return }
-
-      if isSelectingCustomEmoji {
-        isSelectingCustomEmoji = false
-        return
-      }
-
-      onEmojiPickerDismissed()
     }
     .padding(Self.shadowPadding)
-  }
-
-  private func reactionButton(_ emoji: String) -> some View {
-    Button(
-      action: {
-        handleReactionSelected(emoji)
-      },
-      label: {
-        Text(emoji)
-          .font(.system(size: 22))
-          .frame(width: Self.buttonSize, height: Self.buttonSize)
-      }
-    )
-    .buttonStyle(.plain)
-    .background(buttonBackground(key: emoji))
-    .contentShape(Circle())
-    .scaleEffect(isHovered[emoji] == true ? 1.1 : 1.0)
-    .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isHovered[emoji])
-    .onHover { hovering in
-      isHovered[emoji] = hovering
-    }
-    .contextMenu {
-      if !messageReactions.contains(emoji),
-         suggestionCounts[suggestionSources[emoji] ?? emoji, default: 0] > 0 {
-        Button("Remove from suggestions", role: .destructive) {
-          removeSuggestion(emoji)
-        }
-      }
-    }
-  }
-
-  private var moreReactionsButton: some View {
-    Button(action: showEmojiPicker) {
-      Image(systemName: "plus")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.primary)
-        .frame(width: Self.buttonSize - 4, height: Self.buttonSize - 4)
-        .background(
-          Circle().fill(Color.primary.opacity(isHovered[Self.moreReactionsKey] == true ? 0.14 : 0.08))
-        )
-        .frame(width: Self.buttonSize, height: Self.buttonSize)
-    }
-    .buttonStyle(.plain)
-    .contentShape(Circle())
-    .scaleEffect(isHovered[Self.moreReactionsKey] == true ? 1.1 : 1.0)
-    .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isHovered[Self.moreReactionsKey])
-    .onHover { hovering in
-      isHovered[Self.moreReactionsKey] = hovering
-    }
-    .help("More reactions")
-    .accessibilityLabel("More reactions")
-    .background {
-      EmojiPickerPopoverPresenter2(
-        isPresented: $isEmojiPickerPresented,
-        preferredEdge: .maxY,
-        onSelect: handleCustomEmojiSelected
-      )
-      .allowsHitTesting(false)
-    }
-  }
-
-  /// Fades reactions out at an edge with more content past it, so the one next to the plus
-  /// dissolves instead of reading as clipped behind it.
-  private var edgeFadeMask: some View {
-    HStack(spacing: 0) {
-      LinearGradient(
-        colors: [scrollEdges.leading ? .clear : .black, .black],
-        startPoint: .leading,
-        endPoint: .trailing
-      )
-      .frame(width: Self.edgeFadeWidth)
-      Color.black
-      LinearGradient(
-        colors: [.black, scrollEdges.trailing ? .clear : .black],
-        startPoint: .leading,
-        endPoint: .trailing
-      )
-      .frame(width: Self.edgeFadeWidth)
-    }
-  }
-
-  private func buttonBackground(key: String) -> some View {
-    Circle()
-      .fill(Color(NSColor.windowBackgroundColor).opacity(isHovered[key] == true ? 0.6 : 0))
-      .animation(.easeOut(duration: 0.15), value: isHovered[key])
   }
 }
