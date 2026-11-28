@@ -25,6 +25,10 @@ let package = Package(
       targets: ["InlineNotificationFence"]
     ),
     .library(
+      name: "InlineSharedSnapshot",
+      targets: ["InlineSharedSnapshot"]
+    ),
+    .library(
       name: "InlineKit",
       targets: ["InlineKit"]
     ),
@@ -120,6 +124,15 @@ let package = Package(
     // network stack.
     .target(
       name: "InlineNotificationFence",
+      swiftSettings: swiftSettings
+    ),
+
+    // Snapshots the iOS app publishes in the app group for its share and widget extensions.
+    // Extensions never open the app's database; they read these files and check the owner
+    // against the account fence. Kept light so the widget can link it without InlineKit.
+    .target(
+      name: "InlineSharedSnapshot",
+      dependencies: ["InlineNotificationFence"],
       swiftSettings: swiftSettings
     ),
 
@@ -275,6 +288,12 @@ let package = Package(
     .testTarget(
       name: "InlineNotificationFenceTests",
       dependencies: ["InlineNotificationFence"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineSharedSnapshotTests",
+      dependencies: ["InlineSharedSnapshot", "InlineNotificationFence"],
       swiftSettings: swiftSettings
     ),
 
