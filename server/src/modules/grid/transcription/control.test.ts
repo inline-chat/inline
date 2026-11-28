@@ -344,6 +344,43 @@ describe("Grid transcription control and worker authorization", () => {
     expect((await f.current()).transcription?.transcriptChatId).toBe(first.transcriptChatId)
   })
 
+  test("idle claims skip the database until a committed Grid change, then a new run is claimed at once", async () => {
+    const f = await fixture("claim-idle")
+    expect((await api("claim", { workerId: "control-test" })).status).toBe(204)
+    const select = spyOn(db, "select")
+    try {
+      for (const workerId of ["control-test", "other-slot", "control-test"])
+        expect((await api("claim", { workerId })).status).toBe(204)
+      expect(select).not.toHaveBeenCalled()
+    } finally {
+      select.mockRestore()
+    }
+    await f.control(true)
+    expect(await f.claim()).toMatchObject({ roomId: Number(f.roomId), claimEpoch: 1 })
+  })
+
+  test("a claim scan that races a Grid change does not hide the new run", async () => {
+    const f = await fixture("claim-race")
+    const select = db.select.bind(db)
+    const scan = spyOn(db, "select").mockImplementationOnce(((...args: Parameters<typeof db.select>) => {
+      // The change commits after this node read the generation, before its empty scan returns.
+      void gridRealtime.notifyGridSpaceChanged(f.space.id)
+      return select(...args)
+    }) as typeof db.select)
+    try {
+      expect((await api("claim", { workerId: "control-test" })).status).toBe(204)
+    } finally {
+      scan.mockRestore()
+    }
+    const rescan = spyOn(db, "select")
+    try {
+      expect((await api("claim", { workerId: "control-test" })).status).toBe(204)
+      expect(rescan).toHaveBeenCalled()
+    } finally {
+      rescan.mockRestore()
+    }
+  })
+
   test("claim wire binds exact membership, rejects unknown admission and bounds retries, then final is idempotent", async () => {
     const f = await fixture("claim-control")
     const requestId = randomUUID()

@@ -24,6 +24,7 @@ import {
 } from "@in/server/modules/grid/livekit"
 import { lockGridMutations } from "@in/server/modules/grid/roomLifecycle"
 import { notifyGridSpaceChanged } from "@in/server/modules/grid/realtime"
+import { gridClaimGeneration, gridClaimKnownIdle, markGridClaimIdle } from "./claimGate"
 import { SpaceSettingsModel } from "@in/server/db/models/spaceSettings"
 import {
   GRID_TRANSCRIPTION_LEASE_MS,
@@ -61,6 +62,8 @@ const lateFinalSchema = Schema.Struct({
 })
 /** Spooled speech may be transcribed after its run ends, through outages and worker restarts. */
 const LATE_FINAL_WINDOW_MS = 24 * 60 * 60 * 1000
+// Runs waiting on a worker are few; a full page falls through to the locked claim.
+const CLAIM_SCAN_LIMIT = 64
 const tokenSchema = Schema.Struct({
   runId: Schema.String.check(Schema.isUUID()),
   epoch: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -290,14 +293,24 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
           eq(gridTranscriptionRuns.workerId, workerId),
         ),
       )
-      // The worker claims every few seconds while idle. Check without the global
-      // Grid mutation lock first; a run created after this read is claimed next poll.
-      const [candidate] = await db
-        .select({ id: gridTranscriptionRuns.id })
+      // Workers claim every few seconds per slot while idle. Answer from memory
+      // while nothing can be claimed, then check without the global Grid mutation
+      // lock; a run created after this read is claimed next poll.
+      if (gridClaimKnownIdle()) return new Response(null, { status: 204 })
+      const scanGeneration = gridClaimGeneration()
+      const pending = await db
+        .select({ state: gridTranscriptionRuns.state, workerId: gridTranscriptionRuns.workerId })
         .from(gridTranscriptionRuns)
-        .where(claimable)
-        .limit(1)
-      if (!candidate) return new Response(null, { status: 204 })
+        .where(inArray(gridTranscriptionRuns.state, ["starting", "stopping"]))
+        .limit(CLAIM_SCAN_LIMIT)
+      if (pending.length === 0) {
+        markGridClaimIdle(scanGeneration)
+        return new Response(null, { status: 204 })
+      }
+      const claimableHere = pending.some(
+        (run) => run.workerId === workerId || (run.state === "starting" && run.workerId === null),
+      )
+      if (!claimableHere && pending.length < CLAIM_SCAN_LIMIT) return new Response(null, { status: 204 })
       const claimed = await db.transaction(async (tx) => {
         await lockGridMutations(tx)
         const [run] = await tx

@@ -9,6 +9,7 @@ import { waitForPostCommitHooks } from "../db/commitHooks"
 import { applicationBackgroundWork } from "../lifecycle/backgroundWork"
 import { outboundPublications } from "../modules/internalMessaging/outbound"
 import { AccessGuardsCache } from "../modules/authorization/accessGuardsCache"
+import { resetGridClaimGate } from "../modules/grid/transcription/claimGate"
 import { connectionBackgroundWork } from "../ws/backgroundWork"
 
 type Lease = { refs: number; name: string; ready: Promise<void>; release: () => Promise<void> }
@@ -114,6 +115,7 @@ export const cleanDatabase = async () => {
   const [current] = await db.execute<{ name: string }>(sql`SELECT current_database() AS name`)
   if (current?.name !== lease.name) throw new Error("Refusing to clean a database not owned by this test lifecycle.")
   AccessGuardsCache.resetAll()
+  resetGridClaimGate()
   for (let attempt = 1; ; attempt += 1) {
     try {
       await truncatePublicTables()
