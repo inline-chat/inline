@@ -58,6 +58,17 @@ public struct VideoCompressionResult: Sendable {
   public let fileSize: Int64
 }
 
+/// A re-encode whose output uploads while it is written (`NativeLiveUploadSource`). Its size and
+/// length are known up front: the encoder renders at `width` by `height`, and keeps the duration.
+public struct LiveVideoEncode: Sendable {
+  public let url: URL
+  public let width: Int
+  public let height: Int
+  public let duration: Int
+  /// The finished file; it fails, and the caller falls back to `compressVideo`, if encoding fails.
+  public let result: Task<VideoCompressionResult, any Error>
+}
+
 public actor VideoCompressor {
   public static let shared = VideoCompressor()
   private let log = Log.scoped("VideoCompressor")
@@ -172,6 +183,81 @@ public actor VideoCompressor {
     }
   }
 
+  /// Starts re-encoding `sourceURL` with the MP4 header written at the end, so everything after
+  /// the first bytes is final the moment it is written and the file can upload while it grows.
+  /// Nil when the source would be remuxed as is: that takes moments, and keeps its header first.
+  /// Holds an export slot until the encode ends.
+  public func startLiveCompression(
+    at sourceURL: URL,
+    options: VideoCompressionOptions
+  ) async throws -> LiveVideoEncode? {
+    try await acquireExportSlot()
+    let box = PreparationAssetBox(AVURLAsset(url: sourceURL))
+    let plan: (passThrough: Bool, outputSize: CGSize, duration: Int)
+    do {
+      plan = try await TransferPreparation.withDeadline(seconds: 30, cancel: { box.asset.cancelLoading() }) { [self] in
+        let passThrough = try await passesThrough(sourceURL: sourceURL, asset: box.asset, options: options)
+        let track = try await box.asset.loadTracks(withMediaType: .video).first
+        guard let track else { throw VideoCompressionError.invalidAsset }
+        let naturalSize = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let displayed = CGRect(origin: .zero, size: naturalSize).applying(transform)
+        let outputSize = targetRenderSize(
+          for: CGSize(width: abs(displayed.width), height: abs(displayed.height)),
+          maxDimension: options.maxDimension
+        )
+        return (passThrough, outputSize, try await loadMetadata(for: box.asset).duration)
+      }
+    } catch {
+      releaseExportSlot()
+      throw error
+    }
+    guard !plan.passThrough else {
+      releaseExportSlot()
+      return nil
+    }
+    let outputURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("compressed_live_\(UUID().uuidString).mp4")
+    let result = Task { [self] () throws -> VideoCompressionResult in
+      defer { releaseExportSlot() }
+      do {
+        try await TransferPreparation.withDeadline(seconds: 600, cancel: { box.asset.cancelLoading() }) { [self] in
+          try await transcodeTelegramStyle(
+            asset: box.asset, options: options, destinationURL: outputURL, streaming: true
+          )
+        }
+        let metadata = try await loadMetadata(for: AVURLAsset(url: outputURL))
+        return VideoCompressionResult(
+          url: outputURL, width: metadata.width, height: metadata.height,
+          duration: metadata.duration, fileSize: fileSize(for: outputURL)
+        )
+      } catch {
+        try? FileManager.default.removeItem(at: outputURL)
+        throw error
+      }
+    }
+    return LiveVideoEncode(
+      url: outputURL,
+      width: Int(plan.outputSize.width),
+      height: Int(plan.outputSize.height),
+      duration: plan.duration,
+      result: result
+    )
+  }
+
+  /// Whether the source goes as is (remuxed): already H.264 within size and bitrate.
+  private func passesThrough(sourceURL: URL, asset: AVURLAsset, options: VideoCompressionOptions) async throws -> Bool {
+    let metadata = try await loadMetadata(for: asset)
+    let maxDimension = max(metadata.width, metadata.height)
+    let bitrateMbps = estimatedBitrateMbps(fileSize: fileSize(for: sourceURL), duration: metadata.duration)
+    let isH264 = await Self.isH264(asset)
+    return !options.forceTranscode
+      && isH264
+      && maxDimension <= options.maxDimension
+      && bitrateMbps <= options.passthroughBitrateMbps
+      && AVAssetExportSession.exportPresets(compatibleWith: asset).contains(AVAssetExportPresetPassthrough)
+  }
+
   /// Always returns a new file with no location, device or date metadata: the source is either
   /// remuxed as is (already H.264 within size and bitrate, so nothing to wait for) or re-encoded.
   /// It never hands back the source itself.
@@ -183,11 +269,7 @@ public actor VideoCompressor {
     let isH264 = await Self.isH264(asset)
     let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
 
-    let canPassThrough = !options.forceTranscode
-      && isH264
-      && maxDimension <= options.maxDimension
-      && bitrateMbps <= options.passthroughBitrateMbps
-      && compatiblePresets.contains(AVAssetExportPresetPassthrough)
+    let canPassThrough = try await passesThrough(sourceURL: sourceURL, asset: asset, options: options)
 
     log.debug(
       "Video check for \(sourceURL.lastPathComponent): size=\(sourceFileSize) bytes, max=\(maxDimension), bitrate=\(String(format: "%.2f", bitrateMbps)) Mbps, h264=\(isH264), passthrough=\(canPassThrough)"
@@ -318,10 +400,13 @@ public actor VideoCompressor {
     }
   }
 
+  /// `streaming`: the header goes at the end (`shouldOptimizeForNetworkUse` off), so the file can
+  /// upload while it is written; only the media data size near the start changes at the end.
   private func transcodeTelegramStyle(
     asset: AVURLAsset,
     options: VideoCompressionOptions,
-    destinationURL: URL
+    destinationURL: URL,
+    streaming: Bool = false
   ) async throws {
     if FileManager.default.fileExists(atPath: destinationURL.path) {
       try FileManager.default.removeItem(at: destinationURL)
@@ -392,7 +477,7 @@ public actor VideoCompressor {
 
     let reader = try AVAssetReader(asset: composition)
     let writer = try AVAssetWriter(outputURL: destinationURL, fileType: .mp4)
-    writer.shouldOptimizeForNetworkUse = true
+    writer.shouldOptimizeForNetworkUse = !streaming
 
     let videoOutput = AVAssetReaderVideoCompositionOutput(
       videoTracks: [compositionVideoTrack],
@@ -620,7 +705,7 @@ public actor VideoCompressor {
     ]
   }
 
-  private func targetRenderSize(for sourceDisplaySize: CGSize, maxDimension: Int) -> CGSize {
+  private nonisolated func targetRenderSize(for sourceDisplaySize: CGSize, maxDimension: Int) -> CGSize {
     let safeMaxDimension = max(maxDimension, 16)
     let maxSide = max(sourceDisplaySize.width, sourceDisplaySize.height)
     let scale = maxSide > CGFloat(safeMaxDimension) ? CGFloat(safeMaxDimension) / maxSide : 1.0

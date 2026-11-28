@@ -48,18 +48,23 @@ enum NativeUploadPieces {
 /// never going backwards (a part the server lost and the client resends doesn't rewind the bar).
 final class NativeUploadProgressMeter: Sendable {
   private struct State {
+    var total: Int64
     var accepted: Int64 = 0
     var pieces: [UInt32: Int64] = [:]
     var reported: Int64 = -1
   }
 
-  private let total: Int64
   private let report: @Sendable (Int64, Int64) -> Void
-  private let state = OSAllocatedUnfairLock(initialState: State())
+  private let state: OSAllocatedUnfairLock<State>
 
   init(total: Int64, report: @escaping @Sendable (Int64, Int64) -> Void) {
-    self.total = total
     self.report = report
+    state = OSAllocatedUnfairLock(initialState: State(total: total))
+  }
+
+  /// The file's size, once known: a video uploaded while it encodes learns it at the end.
+  func setTotal(_ total: Int64) {
+    publish { state in state.total = total }
   }
 
   /// Bytes of whole parts the server accepted (or holds); clears their piece counts.
@@ -81,21 +86,21 @@ final class NativeUploadProgressMeter: Sendable {
 
   func complete() {
     publish { state in
-      state.accepted = total
+      state.accepted = state.total
       state.pieces.removeAll()
     }
   }
 
   private func publish(_ change: (inout State) -> Void) {
     // The change runs synchronously under the lock and never escapes it.
-    let value: Int64? = state.withLockUnchecked { state in
+    let value: (Int64, Int64)? = state.withLockUnchecked { state in
       change(&state)
-      let current = min(total, state.accepted + state.pieces.values.reduce(0, +))
+      let current = min(state.total, state.accepted + state.pieces.values.reduce(0, +))
       guard current > state.reported else { return nil }
       state.reported = current
-      return current
+      return (current, state.total)
     }
-    if let value { report(value, total) }
+    if let (current, total) = value { report(current, total) }
   }
 }
 

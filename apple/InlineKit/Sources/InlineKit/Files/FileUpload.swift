@@ -773,6 +773,8 @@ public actor FileUploader {
     var resolvedVideoMetadata = videoMetadata
     var resolvedVoiceMetadata = voiceMetadata
     var temporaryArtifacts: [URL] = []
+    /// A video re-encoding while it uploads; see `startLiveVideo`.
+    var liveVideo: (encode: LiveVideoEncode, source: NativeLiveUploadSource)?
 
     // Open the upload connection while the file is prepared below (a video encodes for seconds),
     // so the first part doesn't also wait for its handshake.
@@ -847,6 +849,15 @@ public actor FileUploader {
         uploadFileName = (fileName as NSString).deletingPathExtension + prepared.format.toExt()
       }
     case .video:
+      if let live = try await startLiveVideo(uploadId: uploadId, localUrl: localUrl, metadata: videoMetadata) {
+        uploadUrl = live.encode.url
+        uploadMimeType = "video/mp4"
+        uploadFileName = "\(uploadId).mp4"
+        resolvedVideoMetadata = live.metadata
+        temporaryArtifacts.append(live.encode.url)
+        liveVideo = (live.encode, live.source)
+        break
+      }
       let prepared = try await prepareVideoForUpload(
         uploadId: uploadId,
         localUrl: localUrl,
@@ -869,7 +880,10 @@ public actor FileUploader {
       )
     }
 
+    let liveEncode = liveVideo?.encode
     defer {
+      // A live encode still running is stopped before its output is removed.
+      liveEncode?.result.cancel()
       for url in temporaryArtifacts where FileManager.default.fileExists(atPath: url.path) {
         try? FileManager.default.removeItem(at: url)
       }
@@ -878,7 +892,9 @@ public actor FileUploader {
     try Task.checkCancellation()
     try ensureActiveUpload(uploadId: uploadId, token: token)
 
-    let uploadSizeBytes = Int64(FileHelpers.getFileSize(at: uploadUrl))
+    // A live video's size is known only when it's encoded; progress then follows the upload's own
+    // totals, which grow with the file.
+    let uploadSizeBytes = liveVideo == nil ? Int64(FileHelpers.getFileSize(at: uploadUrl)) : 0
     publishProgress(
       uploadId: uploadId,
       progress: .uploading(id: uploadId, bytesSent: 0, totalBytes: uploadSizeBytes)
@@ -928,29 +944,71 @@ public actor FileUploader {
       finishThumbnail = { @Sendable () async throws -> String? in try await thumbnailAtFinish.value }
     }
     let resolvedFinishThumbnail = finishThumbnail
+    let liveSource = liveVideo?.source
+    let fallbackVideo = liveVideo.map { (encode: $0.encode, metadata: resolvedVideoMetadata, source: localUrl) }
+    let request = NativeMediaUploadRequest(
+      logicalID: uploadId,
+      fileURL: uploadUrl,
+      fileName: uploadFileName,
+      mimeType: uploadMimeType,
+      kind: kind,
+      thumbnailFileUniqueID: thumbnailFileUniqueID,
+      metadata: nativeMetadata,
+      finishGate: finishGate,
+      thumbnailAtFinish: resolvedFinishThumbnail,
+      liveSource: liveSource
+    )
     let transferTask = Task.detached(priority: .userInitiated) {
-      try await DurableUploadCoordinator.shared.upload(
-        NativeMediaUploadRequest(
-          logicalID: uploadId,
-          fileURL: uploadUrl,
-          fileName: uploadFileName,
-          mimeType: uploadMimeType,
-          kind: kind,
-          thumbnailFileUniqueID: thumbnailFileUniqueID,
-          metadata: nativeMetadata,
-          finishGate: finishGate,
-          thumbnailAtFinish: resolvedFinishThumbnail
-        ),
-        progress: { sent, total in
-          progressHandler(
-            ApiClient.UploadTransferProgress(
-              bytesSent: sent,
-              totalBytes: total,
-              fractionCompleted: total > 0 ? Double(sent) / Double(total) : 0
-            )
+      let progress: @Sendable (Int64, Int64) -> Void = { sent, total in
+        progressHandler(
+          ApiClient.UploadTransferProgress(
+            bytesSent: sent,
+            totalBytes: total,
+            fractionCompleted: total > 0 ? Double(sent) / Double(total) : 0
+          )
+        )
+      }
+      do {
+        return try await DurableUploadCoordinator.shared.upload(request, progress: progress)
+      } catch {
+        // A live upload that failed (the encoder touched bytes already sent, a dropped connection)
+        // goes again as the finished file. An encode that failed fails it.
+        guard let fallbackVideo, !(error is CancellationError), !Task.isCancelled else { throw error }
+        let finished: VideoCompressionResult
+        do {
+          finished = try await fallbackVideo.encode.result.value
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          // The streaming encode failed: the full preparation, with its export-preset fallback.
+          let content = await VideoCompressor.content(of: fallbackVideo.source)
+          finished = try await VideoCompressor.shared.compressVideo(
+            at: fallbackVideo.source, options: .upload(for: content)
           )
         }
-      )
+        defer { if finished.url != fallbackVideo.encode.url { try? FileManager.default.removeItem(at: finished.url) } }
+        Log.shared.warning("[FileUploader] Live video upload failed; uploading the encoded file: \(error)")
+        var video = UploadVideoMetadata()
+        video.width = UInt32(finished.width)
+        video.height = UInt32(finished.height)
+        video.duration = UInt32(finished.duration)
+        video.isAnimated = fallbackVideo.metadata?.isAnimated ?? false
+        if let hasAudio = fallbackVideo.metadata?.hasAudio { video.hasAudio_p = hasAudio }
+        return try await DurableUploadCoordinator.shared.upload(
+          NativeMediaUploadRequest(
+            logicalID: request.logicalID,
+            fileURL: finished.url,
+            fileName: request.fileName,
+            mimeType: request.mimeType,
+            kind: request.kind,
+            thumbnailFileUniqueID: request.thumbnailFileUniqueID,
+            metadata: .video(video),
+            finishGate: request.finishGate,
+            thumbnailAtFinish: request.thumbnailAtFinish
+          ),
+          progress: progress
+        )
+      }
     }
     let complete: UploadComplete
     do {
@@ -1319,6 +1377,56 @@ public actor FileUploader {
     let mimeType: String
     let metadata: ApiClient.VideoUploadMetadata
     let cleanupAfterUpload: Bool
+  }
+
+  /// Starts re-encoding a video so it uploads while it encodes, where the server takes a video's size
+  /// at finish (`DurableUploadCoordinator.acceptsSizeAtFinish`). Nil (prepare as usual) when the
+  /// server doesn't, an earlier attempt already prepared the video, or the source would only be
+  /// remuxed, which takes moments. The source learns when encoding ends.
+  private func startLiveVideo(
+    uploadId: String,
+    localUrl: URL,
+    metadata: ApiClient.VideoUploadMetadata?
+  ) async throws -> (encode: LiveVideoEncode, source: NativeLiveUploadSource, metadata: ApiClient.VideoUploadMetadata)? {
+    guard DurableUploadCoordinator.shared.acceptsSizeAtFinish else { return nil }
+    let owner = try Auth.shared.handle.beginAccountMutation()
+    let logicalID = "\(owner.userID):\(uploadId)"
+    if let (_, prepared) = try? await FileNativeUploadStagingStore.shared.preparedVideo(logicalID: logicalID),
+       prepared.version == FileNativeUploadStagingStore.PreparedVideo.currentVersion
+    {
+      return nil
+    }
+    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    let resolved = try await resolveVideoUploadMetadata(localUrl: localUrl, fallback: metadata)
+    let content = await VideoCompressor.content(of: localUrl)
+    let encode: LiveVideoEncode?
+    do {
+      encode = try await VideoCompressor.shared.startLiveCompression(at: localUrl, options: .upload(for: content))
+    } catch is CancellationError {
+      throw FileUploadError.uploadCancelled
+    } catch {
+      // The usual preparation tries again, with its fallbacks.
+      return nil
+    }
+    guard let encode else { return nil }
+    let source = NativeLiveUploadSource()
+    Task.detached {
+      do {
+        _ = try await encode.result.value
+        source.finish()
+      } catch {
+        source.fail(error)
+      }
+    }
+    return (encode, source, ApiClient.VideoUploadMetadata(
+      width: encode.width,
+      height: encode.height,
+      duration: encode.duration,
+      thumbnail: resolved.thumbnail,
+      thumbnailMimeType: resolved.thumbnailMimeType,
+      isAnimated: resolved.isAnimated,
+      hasAudio: resolved.hasAudio
+    ))
   }
 
   private func prepareVideoForUpload(

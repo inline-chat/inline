@@ -36,6 +36,32 @@ func boundedUploadProcessingRetrySeconds(_ seconds: UInt32) -> UInt32 {
   min(maximumUploadProcessingRetrySeconds, max(1, seconds))
 }
 
+/// A file still being written (a video encoding) that uploads as it grows. The writer calls
+/// `finish()` once the file is final, or `fail(_:)`. Bytes after the first part are final once
+/// written; the first part (the MP4 header's size field) is sent only when the file is done.
+public final class NativeLiveUploadSource: Sendable {
+  private let outcome = OSAllocatedUnfairLock<Result<Void, any Error>?>(initialState: nil)
+
+  public init() {}
+
+  public func finish() { outcome.withLock { if $0 == nil { $0 = .success(()) } } }
+  public func fail(_ error: any Error) { outcome.withLock { if $0 == nil { $0 = .failure(error) } } }
+
+  /// Nil while the file is still being written.
+  var result: Result<Void, any Error>? { outcome.withLock { $0 } }
+
+  /// Waits for the file to be final; throws the writer's failure.
+  func waitUntilFinished() async throws {
+    while true {
+      switch result {
+      case .success: return
+      case let .failure(error): throw error
+      case nil: try await Task.sleep(for: .milliseconds(50))
+      }
+    }
+  }
+}
+
 public struct NativeMediaUploadRequest: Sendable {
   public let logicalID: String
   public let fileURL: URL
@@ -51,6 +77,10 @@ public struct NativeMediaUploadRequest: Sendable {
   /// upload can start before its thumbnail is done. Only for servers that take it; see
   /// `DurableUploadCoordinator.acceptsThumbnailAtFinish`.
   public let thumbnailAtFinish: (@Sendable () async throws -> String?)?
+  /// `fileURL` is still being written: a video uploads while it encodes, on servers that take the
+  /// size at finish (`DurableUploadCoordinator.acceptsSizeAtFinish`). Elsewhere the upload waits
+  /// for the file and goes as usual. Such an upload starts over rather than resume after a relaunch.
+  public let liveSource: NativeLiveUploadSource?
 
   public init(
     logicalID: String,
@@ -61,7 +91,8 @@ public struct NativeMediaUploadRequest: Sendable {
     thumbnailFileUniqueID: String? = nil,
     metadata: CreateUploadInput.OneOf_Metadata? = nil,
     finishGate: NativeUploadFinishGate? = nil,
-    thumbnailAtFinish: (@Sendable () async throws -> String?)? = nil
+    thumbnailAtFinish: (@Sendable () async throws -> String?)? = nil,
+    liveSource: NativeLiveUploadSource? = nil
   ) {
     self.logicalID = logicalID
     self.fileURL = fileURL
@@ -73,6 +104,7 @@ public struct NativeMediaUploadRequest: Sendable {
     self.metadata = metadata
     self.finishGate = finishGate
     self.thumbnailAtFinish = thumbnailAtFinish
+    self.liveSource = liveSource
   }
 }
 
@@ -670,6 +702,8 @@ public actor DurableUploadCoordinator: MediaUploading {
     /// ahead of the create reply, and thumbnails at finish).
     var takesClientUploadIDs = false
     var pieceGranularity: Int?
+    /// Takes creates without a digest, and a video's size at finish (CreateUploadResult.size_at_finish).
+    var takesSizeAtFinish = false
   }
 
   private nonisolated let serverTraits: OSAllocatedUnfairLock<ServerTraits>
@@ -678,9 +712,12 @@ public actor DurableUploadCoordinator: MediaUploading {
   private let remembersServerTraits: Bool
   private static let takesClientUploadIDsKey = "nativeUpload.server.takesClientUploadIDs"
   private static let pieceGranularityKey = "nativeUpload.server.pieceGranularity"
+  private static let takesSizeAtFinishKey = "nativeUpload.server.takesSizeAtFinish"
 
   /// Whether this server names thumbnails at finish, learned from earlier creates.
   public nonisolated var acceptsThumbnailAtFinish: Bool { serverTraits.withLock { $0.takesClientUploadIDs } }
+  /// Whether this server takes a video's size at finish, so it can upload while it encodes.
+  public nonisolated var acceptsSizeAtFinish: Bool { serverTraits.withLock { $0.takesSizeAtFinish } }
   private var retryingPendingCancellations = false
   private struct PartTransferWaiter {
     let id: UUID
@@ -709,7 +746,8 @@ public actor DurableUploadCoordinator: MediaUploading {
     let defaults = UserDefaults.standard
     serverTraits = OSAllocatedUnfairLock(initialState: remembersServerTraits ? ServerTraits(
       takesClientUploadIDs: defaults.bool(forKey: Self.takesClientUploadIDsKey),
-      pieceGranularity: defaults.object(forKey: Self.pieceGranularityKey) as? Int
+      pieceGranularity: defaults.object(forKey: Self.pieceGranularityKey) as? Int,
+      takesSizeAtFinish: defaults.bool(forKey: Self.takesSizeAtFinishKey)
     ) : ServerTraits())
   }
 
@@ -740,7 +778,13 @@ public actor DurableUploadCoordinator: MediaUploading {
     }
     let ownerScopedLogicalID = "\(owner):\(request.logicalID)"
     try Task.checkCancellation()
-    let stagedURL = try await staging.stage(
+    let traitsAtStart = serverTraits.withLock { $0 }
+    // A video still encoding streams to a server that takes its size at finish; elsewhere the
+    // upload waits for the encode.
+    let live = request.kind == .video && traitsAtStart.takesSizeAtFinish ? request.liveSource : nil
+    if live == nil, let source = request.liveSource { try await source.waitUntilFinished() }
+    // A growing file can't be staged; it can't resume after a relaunch either (its encoder is gone).
+    let stagedURL = live != nil ? request.fileURL : try await staging.stage(
       logicalID: ownerScopedLogicalID,
       sourceURL: request.fileURL
     )
@@ -748,25 +792,35 @@ public actor DurableUploadCoordinator: MediaUploading {
     do {
       try Task.checkCancellation()
       try validateAccount(accountToken)
-      let byteCount: Int64
+      var byteCount: Int64
       let digest: Data
-      (byteCount, digest) = try await staging.sourceHash(
-        logicalID: ownerScopedLogicalID, stagedURL: stagedURL, compute: Self.hashFile
-      )
+      if live != nil {
+        (byteCount, digest) = (0, Data())
+      } else if traitsAtStart.takesSizeAtFinish {
+        // This server needs no digest (the transport checks every message); skip reading the file.
+        byteCount = Int64(try stagedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        digest = Data()
+      } else {
+        (byteCount, digest) = try await staging.sourceHash(
+          logicalID: ownerScopedLogicalID, stagedURL: stagedURL, compute: Self.hashFile
+        )
+      }
       try Task.checkCancellation()
       try validateAccount(accountToken)
-      guard byteCount > 0 else { throw NativeMediaUploadError.emptySource }
+      guard byteCount > 0 || live != nil else { throw NativeMediaUploadError.emptySource }
       guard byteCount <= Int64(maximumByteCount) else { throw NativeMediaUploadError.fileTooLarge }
 
       var create = CreateUploadInput()
       let identitySalt = try await staging.identitySalt(logicalID: ownerScopedLogicalID)
       create.clientUploadID = Self.clientUploadID(
         logicalID: ownerScopedLogicalID,
-        sourceDigest: digest,
+        // A live upload is new each time: nothing of an earlier attempt can be resumed.
+        sourceDigest: live != nil ? Data((0 ..< 16).map { _ in UInt8.random(in: 0 ... 255) }) : digest,
         identitySalt: identitySalt
       )
       create.fileName = request.fileName
       create.mimeType = request.mimeType
+      // 0 when streaming: the finish names the size.
       create.byteCount = UInt64(byteCount)
       create.sha256 = digest
       create.kind = request.kind
@@ -783,7 +837,7 @@ public actor DurableUploadCoordinator: MediaUploading {
       // progress starts after the first 16 KiB rather than at the end. It takes a part slot like
       // any part, waiting its turn when the window is full (an album).
       // Inline data finishes in create, which a held finish must not do.
-      let holdsInlineSlot = request.finishGate == nil && request.thumbnailAtFinish == nil &&
+      let holdsInlineSlot = request.finishGate == nil && request.thumbnailAtFinish == nil && live == nil &&
         NativeUploadPieces.sendsInline(
         byteCount: byteCount,
         partSize: Int64(Self.partSize),
@@ -805,7 +859,8 @@ public actor DurableUploadCoordinator: MediaUploading {
       // A server that took this client's upload IDs before gets the first part without waiting
       // for the create reply: it holds a part for an upload being created until the create lands.
       let traits = serverTraits.withLock { $0 }
-      let sendsAhead = traits.takesClientUploadIDs && !holdsInlineSlot
+      let sendsAhead = traits.takesClientUploadIDs && !holdsInlineSlot && live == nil
+      let fileByteCount = byteCount
       let partAhead: Task<Bool, Never>? = sendsAhead ? Task { [self] in
         do {
           _ = try await transferPart(
@@ -813,7 +868,7 @@ public actor DurableUploadCoordinator: MediaUploading {
             uploadID: proposedUploadID,
             stagedURL: stagedURL,
             partSize: Int64(Self.partSize),
-            byteCount: byteCount,
+            byteCount: fileByteCount,
             pieceGranularity: traits.pieceGranularity,
             rampUp: true,
             meter: meter,
@@ -844,31 +899,42 @@ public actor DurableUploadCoordinator: MediaUploading {
         // The replay goes without the body: if the first attempt stored it, the result reports
         // it accepted or complete; otherwise the part uploads through the ordinary path.
         create.clearInlineData()
-        createdResult = try await callUploadRPC(
-          method: .createUpload,
-          input: .createUpload(create),
-          timeout: Self.mutationTimeout,
-          accountToken: accountToken
-        )
+        do {
+          createdResult = try await callUploadRPC(
+            method: .createUpload,
+            input: .createUpload(create),
+            timeout: Self.mutationTimeout,
+            accountToken: accountToken
+          )
+        } catch {
+          // A create without a digest or size goes only to servers that said they take one. One
+          // that fails may have reached a server that doesn't (a rollback, a machine mid-deploy):
+          // forget the trait so the next attempt sends both, and relearn it from that create.
+          if create.sha256.isEmpty || create.byteCount == 0 { forgetSizeAtFinish() }
+          throw error
+        }
       }
       guard case let .createUpload(created)? = createdResult else {
         throw NativeMediaUploadError.unexpectedResponse
       }
       let tookProposedID = created.uploadID == proposedUploadID
       let granularity = created.hasPieceGranularity ? Int(created.pieceGranularity) : nil
+      let sizeAtFinish = created.hasSizeAtFinish && created.sizeAtFinish
       serverTraits.withLock { traits in
         traits.takesClientUploadIDs = tookProposedID
         traits.pieceGranularity = granularity
+        traits.takesSizeAtFinish = sizeAtFinish
       }
       if remembersServerTraits {
         UserDefaults.standard.set(tookProposedID, forKey: Self.takesClientUploadIDsKey)
         UserDefaults.standard.set(granularity, forKey: Self.pieceGranularityKey)
+        UserDefaults.standard.set(sizeAtFinish, forKey: Self.takesSizeAtFinishKey)
       }
       if !tookProposedID { partAhead?.cancel() }
       let partSize = Int64(created.partSize)
       guard created.uploadID.count == 16,
             partSize == Self.partSize,
-            created.partCount > 0,
+            live != nil ? created.partCount == 0 : created.partCount > 0,
             created.partCount <= Self.maximumPartCount,
             Int64(created.partCount) == (byteCount + partSize - 1) / partSize
       else {
@@ -904,6 +970,7 @@ public actor DurableUploadCoordinator: MediaUploading {
       }
 
       var accepted = Set(created.acceptedParts)
+      var partCount = created.partCount
       // Part 0 is already on its way; the loop below sends the rest alongside it.
       var partAheadPending = tookProposedID ? partAhead : nil
       guard accepted.allSatisfy({ $0 < created.partCount }) else {
@@ -919,7 +986,8 @@ public actor DurableUploadCoordinator: MediaUploading {
         partSize: partSize,
         total: byteCount
       )
-      let pieceGranularity = created.hasPieceGranularity ? Int(created.pieceGranularity) : nil
+      // Streaming sends whole parts: the server takes no pieces of a last part it can't know.
+      let pieceGranularity = created.hasPieceGranularity && live == nil ? Int(created.pieceGranularity) : nil
       try validateAccount(accountToken)
       meter.accepted(durableAcceptedBytes)
       let transferClock = ContinuousClock()
@@ -933,14 +1001,35 @@ public actor DurableUploadCoordinator: MediaUploading {
       let processingClock = ContinuousClock()
       var processingDeadline: ContinuousClock.Instant?
       do {
+        if let live {
+          // Parts go as the encoder writes past them; the first, which it rewrites, and the
+          // last go below once it's done, like any upload's remaining parts.
+          let streamed = try await streamWhileWritten(
+            live,
+            uploadID: created.uploadID,
+            fileURL: stagedURL,
+            partSize: partSize,
+            maximumByteCount: Int64(maximumByteCount),
+            progress: progress,
+            accountToken: accountToken
+          )
+          byteCount = streamed.byteCount
+          partCount = UInt32((byteCount + partSize - 1) / partSize)
+          accepted = streamed.sent
+          meter.setTotal(byteCount)
+          durableAcceptedBytes = Self.acceptedBytes(accepted, partSize: partSize, total: byteCount)
+          meter.accepted(durableAcceptedBytes)
+        }
         while true {
           try Task.checkCancellation()
-          let missingParts = (0 ..< created.partCount).filter {
+          let missingParts = (0 ..< partCount).filter {
             !accepted.contains($0) && !(partAheadPending != nil && $0 == 0)
           }
           if !missingParts.isEmpty {
             processingDeadline = nil
             if transferStartedAt == nil { transferStartedAt = transferClock.now }
+            // Tasks capture the size as it is now (a live upload learned it above).
+            let fileByteCount = byteCount
             try await withThrowingTaskGroup(of: UInt32.self) { group in
               var nextPart = 0
               // Tasks only wait for a slot; the shared window decides how many parts move, and
@@ -956,7 +1045,7 @@ public actor DurableUploadCoordinator: MediaUploading {
                     uploadID: created.uploadID,
                     stagedURL: stagedURL,
                     partSize: partSize,
-                    byteCount: byteCount,
+                    byteCount: fileByteCount,
                     pieceGranularity: pieceGranularity,
                     rampUp: rampUp,
                     meter: meter,
@@ -986,7 +1075,7 @@ public actor DurableUploadCoordinator: MediaUploading {
                       uploadID: created.uploadID,
                       stagedURL: stagedURL,
                       partSize: partSize,
-                      byteCount: byteCount,
+                      byteCount: fileByteCount,
                       pieceGranularity: pieceGranularity,
                       rampUp: false,
                       meter: meter,
@@ -1038,6 +1127,7 @@ public actor DurableUploadCoordinator: MediaUploading {
           var finish = FinishUploadInput()
           finish.uploadID = created.uploadID
           if let finishThumbnail { finish.thumbnailFileUniqueID = finishThumbnail }
+          if live != nil { finish.byteCount = UInt64(byteCount) }
           let finished: FinishUploadResult
           do {
             let result = try await callUploadRPC(
@@ -1071,7 +1161,7 @@ public actor DurableUploadCoordinator: MediaUploading {
               try validateAccount(accountToken)
               return complete
             case let .uploading(reconciledAccepted):
-              guard reconciledAccepted.allSatisfy({ $0 < created.partCount }) else {
+              guard reconciledAccepted.allSatisfy({ $0 < partCount }) else {
                 throw NativeMediaUploadError.invalidGeometry
               }
               accepted = reconciledAccepted
@@ -1116,7 +1206,7 @@ public actor DurableUploadCoordinator: MediaUploading {
             return complete
           case let .missing(missing):
             guard !missing.partIndices.isEmpty,
-                  missing.partIndices.allSatisfy({ $0 < created.partCount }) else {
+                  missing.partIndices.allSatisfy({ $0 < partCount }) else {
               throw NativeMediaUploadError.invalidGeometry
             }
             missingPartRounds += 1
@@ -1137,7 +1227,8 @@ public actor DurableUploadCoordinator: MediaUploading {
           }
         }
       } catch {
-        if Task.isCancelled || Self.isTerminalFailure(error) || !isAccountCurrent(accountToken) {
+        // A live upload can't resume (its encoder is gone): any failure ends it.
+        if Task.isCancelled || live != nil || Self.isTerminalFailure(error) || !isAccountCurrent(accountToken) {
           await cancelAndDiscard(
             uploadID: created.uploadID,
             logicalID: ownerScopedLogicalID,
@@ -1287,6 +1378,107 @@ public actor DurableUploadCoordinator: MediaUploading {
     case .unspecified, .UNRECOGNIZED:
       throw NativeMediaUploadError.unexpectedResponse
     }
+  }
+
+  private enum StreamEvent: Sendable {
+    case sent(UInt32, Data)
+    case tick
+  }
+
+  /// How often a live upload checks how far its file has grown.
+  static let liveGrowthPollInterval: Duration = .milliseconds(100)
+
+  /// Sends each part of a growing file once the writer has written past it, except the first
+  /// (the writer rewrites the MP4 header's size there at the end). Returns when the file is final,
+  /// with its size and the parts sent. A sent part that changed afterwards fails the upload with
+  /// `sourceChanged` (the caller uploads the finished file instead).
+  private func streamWhileWritten(
+    _ live: NativeLiveUploadSource,
+    uploadID: Data,
+    fileURL: URL,
+    partSize: Int64,
+    maximumByteCount: Int64,
+    progress: @escaping @Sendable (Int64, Int64) -> Void,
+    accountToken: AuthAccountMutationToken?
+  ) async throws -> (byteCount: Int64, sent: Set<UInt32>) {
+    var sentHashes: [UInt32: Data] = [:]
+    try await withThrowingTaskGroup(of: StreamEvent.self) { group in
+      var nextPart: UInt32 = 1
+      var inFlight = 0
+      var tickPending = false
+      while true {
+        try Task.checkCancellation()
+        let outcome = live.result
+        if case let .failure(error)? = outcome { throw error }
+        let written = Self.fileSize(fileURL)
+        guard written <= maximumByteCount else { throw NativeMediaUploadError.fileTooLarge }
+        if outcome == nil {
+          // Parts wholly written are final, except the first.
+          let ready = UInt32(written / partSize)
+          while nextPart < ready, inFlight < Self.partWindowLimits.upperBound {
+            let partIndex = nextPart
+            nextPart += 1
+            inFlight += 1
+            group.addTask { [self] in
+              let data = try await Self.readPart(
+                at: fileURL, offset: UInt64(Int64(partIndex) * partSize), length: Int(partSize)
+              )
+              _ = try await transferPart(
+                partIndex,
+                uploadID: uploadID,
+                stagedURL: fileURL,
+                partSize: partSize,
+                byteCount: Int64(partIndex + 1) * partSize,
+                accountToken: accountToken
+              )
+              return .sent(partIndex, Data(SHA256.hash(data: data)))
+            }
+          }
+          if !tickPending {
+            tickPending = true
+            group.addTask {
+              try await Task.sleep(for: Self.liveGrowthPollInterval)
+              return .tick
+            }
+          }
+        } else if inFlight == 0 {
+          group.cancelAll()
+          break
+        }
+        guard let event = try await group.next() else { break }
+        switch event {
+        case .tick:
+          tickPending = false
+        case let .sent(partIndex, hash):
+          inFlight -= 1
+          sentHashes[partIndex] = hash
+          let sentBytes = Int64(sentHashes.count) * partSize
+          progress(sentBytes, max(sentBytes, Self.fileSize(fileURL)))
+        }
+      }
+    }
+    let byteCount = Self.fileSize(fileURL)
+    guard byteCount > 0 else { throw NativeMediaUploadError.emptySource }
+    guard byteCount <= maximumByteCount else { throw NativeMediaUploadError.fileTooLarge }
+    // The writer is expected to touch only the first part at the end; prove nothing sent moved.
+    for (partIndex, hash) in sentHashes {
+      let offset = Int64(partIndex) * partSize
+      guard offset + partSize <= byteCount else { throw NativeMediaUploadError.sourceChanged }
+      let data = try await Self.readPart(at: fileURL, offset: UInt64(offset), length: Int(partSize))
+      guard Data(SHA256.hash(data: data)) == hash else { throw NativeMediaUploadError.sourceChanged }
+    }
+    return (byteCount, Set(sentHashes.keys))
+  }
+
+  /// The file's current size; `stat`, since URL resource values are cached and the file grows.
+  private func forgetSizeAtFinish() {
+    serverTraits.withLock { $0.takesSizeAtFinish = false }
+    if remembersServerTraits { UserDefaults.standard.set(false, forKey: Self.takesSizeAtFinishKey) }
+  }
+
+  private static func fileSize(_ url: URL) -> Int64 {
+    var info = stat()
+    return stat(url.path, &info) == 0 ? Int64(info.st_size) : 0
   }
 
   private func transferPart(
