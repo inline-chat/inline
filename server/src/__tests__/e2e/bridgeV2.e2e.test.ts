@@ -75,6 +75,14 @@ describe("bridge v2 end to end", () => {
     await runRustSide("codex_round_trip_through_inline")
   }, 30 * 60_000)
 
+  test("Codex: a session from the machine opens in a thread with its whole conversation and keeps syncing", async () => {
+    await runRustSide("codex_opens_a_session_from_the_machine")
+  }, 30 * 60_000)
+
+  test("Claude Code: a session from the machine opens from its pasted resume command and keeps syncing", async () => {
+    await runRustSide("claude_opens_a_session_from_the_machine")
+  }, 30 * 60_000)
+
   test("Claude Code: a DM answers, uses Inline tools, asks for approval and releases", async () => {
     await runRustSide("claude_round_trip_through_inline")
   }, 30 * 60_000)
