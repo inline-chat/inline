@@ -9,7 +9,11 @@ public enum FocusStatusDirectReport {
   /// Whether the signed-in user shares Focus with anyone. The app writes it so an
   /// extension never reports Focus for someone who shares it with nobody.
   public static func setSharing(_ sharing: Bool, userId: Int64) {
-    UserDefaults.shared.set(sharing, forKey: sharingKey(userId: userId))
+    let key = sharingKey(userId: userId)
+    // Called on every activation and Focus poll; an unchanged write still posts
+    // `UserDefaults.didChangeNotification` to every observer in the process.
+    guard UserDefaults.shared.object(forKey: key) as? Bool != sharing else { return }
+    UserDefaults.shared.set(sharing, forKey: key)
   }
 
   public static func isSharing(userId: Int64) -> Bool {
