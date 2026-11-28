@@ -76,6 +76,7 @@ export {
   type InlineProtocolV3TransportState,
 } from "./realtime/v3-transport.js"
 export type { RpcInput } from "./realtime/rpc-input.js"
+export { InlineResponseUi, type InlineOpenUrlOptions } from "./sdk/response-ui.js"
 export {
   ProtocolClientError,
   type RpcCallOptions,

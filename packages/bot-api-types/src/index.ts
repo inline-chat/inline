@@ -917,7 +917,12 @@ export type DeleteReactionParams = SendReactionParams
 
 export type AnswerMessageActionParams = {
   interaction_id: BotInputId
+  /** A short toast for the person who pressed. Send `text` or `url`, not both. */
   text?: string
+  /** Opened for the person who pressed, on the device they pressed on. */
+  url?: string
+  /** The URL carries a credential, such as a one-time login. */
+  url_sensitive?: boolean
 }
 
 export type BotChatAction =

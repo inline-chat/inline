@@ -1373,11 +1373,50 @@ export interface MessageActionResponseUi {
         /**
          * @generated from protobuf field: MessageActionAlert alert = 2;
          */
-        alert: MessageActionAlert; // Reserved for future expandability:
-        // 3 => open_url
+        alert: MessageActionAlert;
+    } | {
+        oneofKind: "openUrl";
+        /**
+         * @generated from protobuf field: MessageActionResponseOpenUrl open_url = 3;
+         */
+        openUrl: MessageActionResponseOpenUrl;
     } | {
         oneofKind: undefined;
     };
+}
+/**
+ * Opens a URL for the person who pressed, on the device they pressed on and
+ * within 30 seconds of the press. Apps never act on it from catch-up, on
+ * other devices, or after the window.
+ *
+ * @generated from protobuf message MessageActionResponseOpenUrl
+ */
+export interface MessageActionResponseOpenUrl {
+    /**
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * The URL carries a credential, such as a one-time login. Inline never logs
+     * or stores it, synced copies of the answer drop it, and apps never show,
+     * copy or keep it.
+     *
+     * @generated from protobuf field: bool sensitive = 2;
+     */
+    sensitive: boolean;
+    /**
+     * The machine the URL belongs to, for messages ("Mo's MacBook Pro").
+     *
+     * @generated from protobuf field: optional string host_label = 3;
+     */
+    hostLabel?: string;
+    /**
+     * Shown instead of opening when a loopback URL is not reachable from the
+     * pressing device, for example how to turn on Tailscale Serve.
+     *
+     * @generated from protobuf field: optional string unreachable_text = 4;
+     */
+    unreachableText?: string;
 }
 /**
  * @generated from protobuf message MessageActionToast
@@ -16521,6 +16560,13 @@ export enum BotChatSettingsInfo_Tone {
  * @generated from protobuf message BotChatSettingsButton
  */
 export interface BotChatSettingsButton {
+    /**
+     * Pressing it opens a page outside Inline: apps mark it and show progress
+     * until the bot answers.
+     *
+     * @generated from protobuf field: bool opens_url = 1;
+     */
+    opensUrl: boolean;
 }
 /**
  * A host-local workspace selector. Values are opaque bot-owned identifiers;
@@ -16683,6 +16729,13 @@ export interface BotChatSettingsResponse {
     } | {
         oneofKind: undefined;
     };
+    /**
+     * For the person who pressed: a toast, alert or URL to open. Only answers to
+     * an item invocation carry it; Inline drops it from settings fetches.
+     *
+     * @generated from protobuf field: optional MessageActionResponseUi ui = 3;
+     */
+    ui?: MessageActionResponseUi;
 }
 /**
  * @generated from protobuf message RequestBotChatSettingsInput
@@ -23164,7 +23217,8 @@ class MessageActionResponseUi$Type extends MessageType<MessageActionResponseUi> 
     constructor() {
         super("MessageActionResponseUi", [
             { no: 1, name: "toast", kind: "message", oneof: "kind", T: () => MessageActionToast },
-            { no: 2, name: "alert", kind: "message", oneof: "kind", T: () => MessageActionAlert }
+            { no: 2, name: "alert", kind: "message", oneof: "kind", T: () => MessageActionAlert },
+            { no: 3, name: "open_url", kind: "message", oneof: "kind", T: () => MessageActionResponseOpenUrl }
         ]);
     }
     create(value?: PartialMessage<MessageActionResponseUi>): MessageActionResponseUi {
@@ -23191,6 +23245,12 @@ class MessageActionResponseUi$Type extends MessageType<MessageActionResponseUi> 
                         alert: MessageActionAlert.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).alert)
                     };
                     break;
+                case /* MessageActionResponseOpenUrl open_url */ 3:
+                    message.kind = {
+                        oneofKind: "openUrl",
+                        openUrl: MessageActionResponseOpenUrl.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).openUrl)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23209,6 +23269,9 @@ class MessageActionResponseUi$Type extends MessageType<MessageActionResponseUi> 
         /* MessageActionAlert alert = 2; */
         if (message.kind.oneofKind === "alert")
             MessageActionAlert.internalBinaryWrite(message.kind.alert, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* MessageActionResponseOpenUrl open_url = 3; */
+        if (message.kind.oneofKind === "openUrl")
+            MessageActionResponseOpenUrl.internalBinaryWrite(message.kind.openUrl, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23219,6 +23282,75 @@ class MessageActionResponseUi$Type extends MessageType<MessageActionResponseUi> 
  * @generated MessageType for protobuf message MessageActionResponseUi
  */
 export const MessageActionResponseUi = new MessageActionResponseUi$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageActionResponseOpenUrl$Type extends MessageType<MessageActionResponseOpenUrl> {
+    constructor() {
+        super("MessageActionResponseOpenUrl", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "sensitive", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "host_label", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "unreachable_text", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageActionResponseOpenUrl>): MessageActionResponseOpenUrl {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        message.sensitive = false;
+        if (value !== undefined)
+            reflectionMergePartial<MessageActionResponseOpenUrl>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageActionResponseOpenUrl): MessageActionResponseOpenUrl {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* bool sensitive */ 2:
+                    message.sensitive = reader.bool();
+                    break;
+                case /* optional string host_label */ 3:
+                    message.hostLabel = reader.string();
+                    break;
+                case /* optional string unreachable_text */ 4:
+                    message.unreachableText = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageActionResponseOpenUrl, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* bool sensitive = 2; */
+        if (message.sensitive !== false)
+            writer.tag(2, WireType.Varint).bool(message.sensitive);
+        /* optional string host_label = 3; */
+        if (message.hostLabel !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.hostLabel);
+        /* optional string unreachable_text = 4; */
+        if (message.unreachableText !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.unreachableText);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageActionResponseOpenUrl
+ */
+export const MessageActionResponseOpenUrl = new MessageActionResponseOpenUrl$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageActionToast$Type extends MessageType<MessageActionToast> {
     constructor() {
@@ -62699,18 +62831,40 @@ export const BotChatSettingsInfo = new BotChatSettingsInfo$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class BotChatSettingsButton$Type extends MessageType<BotChatSettingsButton> {
     constructor() {
-        super("BotChatSettingsButton", []);
+        super("BotChatSettingsButton", [
+            { no: 1, name: "opens_url", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
     }
     create(value?: PartialMessage<BotChatSettingsButton>): BotChatSettingsButton {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.opensUrl = false;
         if (value !== undefined)
             reflectionMergePartial<BotChatSettingsButton>(this, message, value);
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotChatSettingsButton): BotChatSettingsButton {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool opens_url */ 1:
+                    message.opensUrl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: BotChatSettingsButton, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool opens_url = 1; */
+        if (message.opensUrl !== false)
+            writer.tag(1, WireType.Varint).bool(message.opensUrl);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -63018,7 +63172,8 @@ class BotChatSettingsResponse$Type extends MessageType<BotChatSettingsResponse> 
     constructor() {
         super("BotChatSettingsResponse", [
             { no: 1, name: "document", kind: "message", oneof: "result", T: () => BotChatSettingsDocument },
-            { no: 2, name: "problem", kind: "message", oneof: "result", T: () => BotChatSettingsProblem }
+            { no: 2, name: "problem", kind: "message", oneof: "result", T: () => BotChatSettingsProblem },
+            { no: 3, name: "ui", kind: "message", T: () => MessageActionResponseUi }
         ]);
     }
     create(value?: PartialMessage<BotChatSettingsResponse>): BotChatSettingsResponse {
@@ -63045,6 +63200,9 @@ class BotChatSettingsResponse$Type extends MessageType<BotChatSettingsResponse> 
                         problem: BotChatSettingsProblem.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).problem)
                     };
                     break;
+                case /* optional MessageActionResponseUi ui */ 3:
+                    message.ui = MessageActionResponseUi.internalBinaryRead(reader, reader.uint32(), options, message.ui);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -63063,6 +63221,9 @@ class BotChatSettingsResponse$Type extends MessageType<BotChatSettingsResponse> 
         /* BotChatSettingsProblem problem = 2; */
         if (message.result.oneofKind === "problem")
             BotChatSettingsProblem.internalBinaryWrite(message.result.problem, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageActionResponseUi ui = 3; */
+        if (message.ui)
+            MessageActionResponseUi.internalBinaryWrite(message.ui, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
