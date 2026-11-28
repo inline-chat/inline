@@ -1,4 +1,3 @@
-import Auth
 import Foundation
 import InlineConfig
 
@@ -12,7 +11,6 @@ public enum ExperimentalFeatureFlags {
 
   /// Read only to migrate pre-`sidebarMode` installs; never written.
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
-  public static let nativeFileDownloadsKey = "experimental.nativeFileDownloads"
   public static let quickForwardKey = "experimental.quickForward"
 
   /// Opt-in macOS experiment; an unset preference intentionally defaults to false.
@@ -32,15 +30,5 @@ public enum ExperimentalFeatureFlags {
 
   public static var fileBrowserEnabled: Bool {
     UserDefaults.standard.bool(forKey: fileBrowserKey)
-  }
-
-  /// Native downloads stay opt-in at every size, on either authenticated realtime transport.
-  public static var nativeFileDownloadsEnabled: Bool {
-    nativeFileDownloadsEnabled(auth: Auth.shared.handle)
-  }
-
-  static func nativeFileDownloadsEnabled(auth: AuthHandle) -> Bool {
-    guard (try? auth.beginAccountMutation()) != nil else { return false }
-    return UserDefaults.standard.bool(forKey: nativeFileDownloadsKey)
   }
 }

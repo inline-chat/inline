@@ -145,13 +145,18 @@ public actor NativeDownloadManager {
   var waitingParts: Int { partWaiters.count }
   /// Player reads waiting for bytes (tests).
   var waitingReads: Int { byteWaiters.count }
+  /// Time in the background does not count against a file's stall budget (see `remaining`).
+  private let lifecycle: TransferLifecycle
   public init() {
     retryBudget = .seconds(180); retryBaseDelay = .seconds(1); windowLimits = 2 ... 12; window = 4
+    lifecycle = .shared
   }
   init(retryBudget: Duration = .seconds(180), retryBaseDelay: Duration = .seconds(1),
-       window limits: ClosedRange<Int> = 2 ... 12, initialWindow: Int = 4) {
+       window limits: ClosedRange<Int> = 2 ... 12, initialWindow: Int = 4,
+       lifecycle: TransferLifecycle = TransferLifecycle()) {
     self.retryBudget = retryBudget; self.retryBaseDelay = retryBaseDelay
     windowLimits = limits; window = min(max(initialWindow, limits.lowerBound), limits.upperBound)
+    self.lifecycle = lifecycle
   }
 
   public func download(
@@ -745,9 +750,14 @@ public actor NativeDownloadManager {
     for observer in entry.observers.values { observer(count, Int64(total)) }
     if !byteWaiters.isEmpty { resumeByteWaiters() }
   }
+  /// What is left of a file's stall budget. It does not run in the background, and restarts on
+  /// return to the foreground: a stall there is the system suspending the app, so a file locked
+  /// away for ten minutes resumes on return instead of failing on its first dead socket.
   private func remaining(_ key: Key, id: UUID) -> Duration {
     guard let entry = entries[key], entry.id == id else { return .zero }
-    return ContinuousClock.now.duration(to: entry.lastProgress.advanced(by: entry.request.stallBudget ?? retryBudget))
+    let budget = entry.request.stallBudget ?? retryBudget
+    guard let start = lifecycle.budgetStart(lastProgress: entry.lastProgress) else { return budget }
+    return ContinuousClock.now.duration(to: start.advanced(by: budget))
   }
   private func retryDelay(_ attempt: Int) -> Duration { min(retryBaseDelay * (1 << min(attempt, 3)), .seconds(8)) }
 
@@ -1177,22 +1187,28 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
       manager: .shared, accountID: accountToken.userID, location: location,
       directory: destination.deletingLastPathComponent(), progress: progress
     )
-    let response = try await Api.realtime.withUserInitiatedConnection(
-      accountToken: accountToken, timeout: .seconds(60)
-    ) { realtime in
-      try await realtime.callRpcDirect(
-        method: .getMessages,
-        input: .getMessages(.with {
-          $0.peerID = message.peerId.toInputPeer()
-          $0.messageIds = [message.messageId]
-        }), timeout: .seconds(30), accountToken: accountToken
-      )
+    let peer = message.peerId.toInputPeer()
+    let messageID = message.messageId
+    let accountToken = accountToken
+    let response = try await Self.retryingTransientFailures(
+      validateAccount: { try auth.validateAccountMutation(accountToken) }
+    ) {
+      try await Api.realtime.withUserInitiatedConnection(
+        accountToken: accountToken, timeout: .seconds(60)
+      ) { realtime in
+        try await realtime.callRpcDirect(
+          method: .getMessages,
+          input: .getMessages(.with {
+            $0.peerID = peer
+            $0.messageIds = [messageID]
+          }), timeout: .seconds(30), accountToken: accountToken
+        )
+      }
     }
     try auth.validateAccountMutation(accountToken)
     guard case let .getMessages(messages)? = response else { throw NativeFileDownloadError.invalidResponse }
     let fileID = try Self.fileID(in: messages, media: media, location: location)
     let auth = auth
-    let accountToken = accountToken
     let provenance = location
     return try await Self.downloadWithRangeFallback(
       manager: .shared, native: self, link: link, progress: progress,
@@ -1203,6 +1219,28 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
         accountToken: accountToken, validateAccount: { try auth.validateAccountMutation(accountToken) },
         priority: priority, stallBudget: stallBudget, transport: transport
       )
+    }
+  }
+
+  /// Runs `call` again after a transient transport failure, a few times. The lookup before a
+  /// transfer is the step most likely to be cut by suspension (its timeout runs out while the app
+  /// is away, then fails on return); giving up there would restart the file as a whole-file CDN
+  /// download that cannot resume.
+  static func retryingTransientFailures<Value: Sendable>(
+    attempts: Int = 3, baseDelay: Duration = .seconds(1),
+    validateAccount: () throws -> Void,
+    _ call: () async throws -> Value
+  ) async throws -> Value {
+    var attempt = 0
+    while true {
+      do {
+        return try await call()
+      } catch {
+        attempt += 1
+        try Task.checkCancellation(); try validateAccount()
+        guard attempt < attempts, NativeFileDownloader.isRetryableTransportFailure(error) else { throw error }
+        try await Task.sleep(for: baseDelay * (1 << (attempt - 1)))
+      }
     }
   }
 

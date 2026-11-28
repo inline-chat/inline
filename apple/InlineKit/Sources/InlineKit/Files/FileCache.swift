@@ -18,7 +18,7 @@ public actor FileCache: Sendable {
 
   typealias PhotoDataLoader = @Sendable (URL) async throws -> (Data, URLResponse)
   /// Downloads one stored photo size natively into `destination`, authorized by its message.
-  /// Returns nil without trying when native downloads are off.
+  /// Returns nil without trying when no account is signed in.
   typealias NativePhotoLoader = @Sendable (
     _ fileID: String, _ location: FileMessageLocation, _ destination: URL
   ) async throws -> URL?
@@ -29,7 +29,8 @@ public actor FileCache: Sendable {
 
   static let nativePhotoDownload: NativePhotoLoader = { fileID, location, destination in
     let auth = Auth.shared.handle
-    guard ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth) else { return nil }
+    // Signed out there is no account to authorize the ranges; the CDN link is all there is.
+    guard (try? auth.beginAccountMutation()) != nil else { return nil }
     return try await NativeMessageFileDownload(auth: auth).download(
       fileID: fileID, location: location, to: destination, stallBudget: nativePhotoStallBudget
     )

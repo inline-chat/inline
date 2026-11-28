@@ -239,7 +239,17 @@ public final class FileDownloader: NSObject, Sendable {
   private var requestCompletions: [String: RequestCompletions] = [:]
   // Keep canceled native work owned until it settles, including during logout.
   private var nativeTasks: [UUID: Task<Void, Never>] = [:]
-  private var activeDownloadTokens: [String: UUID] = [:]
+  private var activeDownloadTokens: [String: UUID] = [:] {
+    didSet {
+      #if os(iOS)
+      backgroundTime?.setActive(!activeDownloadTokens.isEmpty)
+      #endif
+    }
+  }
+  #if os(iOS)
+  /// Background time while downloads run; only the app's shared owner holds it.
+  private var backgroundTime: BackgroundDownloadTime?
+  #endif
   private var finalizationTasks: [String: FinalizationTask] = [:]
   private var session: URLSession!
   /// Where each CDN task's file goes, readable from the URLSession delegate queue.
@@ -258,6 +268,9 @@ public final class FileDownloader: NSObject, Sendable {
 
   override private convenience init() {
     self.init(auth: Auth.shared.handle)
+    #if os(iOS)
+    backgroundTime = BackgroundDownloadTime()
+    #endif
   }
 
   /// Folders where native downloads keep resumable partials: swept at launch, cleared with
@@ -381,7 +394,7 @@ public final class FileDownloader: NSObject, Sendable {
     }
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth), let message {
+      if let message {
         let source = try NativeMessageFileDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
@@ -476,17 +489,13 @@ public final class FileDownloader: NSObject, Sendable {
     }()
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth) {
-        let source = try NativeMessageFileDownload(auth: auth)
-        nativeDownload = { destination, progress in
-          try await source.download(
-            media: .video(video.video.videoId), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) },
-            priority: priority, progress: progress
-          )
-        }
-      } else {
-        nativeDownload = nil
+      let source = try NativeMessageFileDownload(auth: auth)
+      nativeDownload = { destination, progress in
+        try await source.download(
+          media: .video(video.video.videoId), message: message, to: destination,
+          fallback: url.map { CDNLink($0, refresh: refreshLink) },
+          priority: priority, progress: progress
+        )
       }
     } catch {
       completion(.failure(error))
@@ -592,17 +601,13 @@ public final class FileDownloader: NSObject, Sendable {
     }()
     let nativeDownload: NativeDownloadOperation?
     do {
-      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth) {
-        let source = try NativeMessageFileDownload(auth: auth)
-        let voiceID = voice.voiceID
-        nativeDownload = { destination, progress in
-          try await source.download(
-            media: .voice(voiceID), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
-          )
-        }
-      } else {
-        nativeDownload = nil
+      let source = try NativeMessageFileDownload(auth: auth)
+      let voiceID = voice.voiceID
+      nativeDownload = { destination, progress in
+        try await source.download(
+          media: .voice(voiceID), message: message, to: destination,
+          fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
+        )
       }
     } catch {
       completion(.failure(error))
@@ -691,13 +696,11 @@ public final class FileDownloader: NSObject, Sendable {
   }
 
   /// Plays `video` while it downloads natively, from the same bytes the chat keeps, or nil when
-  /// native downloads are off (stream the CDN link then). It downloads at user priority. A
+  /// signed out (stream the CDN link then). It downloads at user priority. A
   /// download the stream started stops when the stream closes before it finishes, keeping its
   /// bytes; one already running when it opened keeps going.
   public func videoStream(video: VideoInfo, for message: Message) -> NativeVideoStream? {
-    guard ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth),
-          let accountToken = try? auth.beginAccountMutation()
-    else { return nil }
+    guard let accountToken = try? auth.beginAccountMutation() else { return nil }
     let target = NativeDownloadManager.StreamTarget(
       accountID: accountToken.userID, message: Self.location(for: message),
       directory: FileCache.getUrl(for: .videos, localPath: "stream").deletingLastPathComponent()
