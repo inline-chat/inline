@@ -2,7 +2,7 @@ import AppKit
 
 /// Shared horizontal geometry for the conversation and its composer.
 enum ChatLayoutMetrics {
-  static let maximumWidth: CGFloat = 750
+  static let maximumWidth: CGFloat = 850
   static let leadingControlCenterX: CGFloat = 32
 
   static func avatarLeadingInset(size: CGFloat) -> CGFloat {
