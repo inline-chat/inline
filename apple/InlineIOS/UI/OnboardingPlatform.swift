@@ -68,8 +68,10 @@ extension View {
   @ViewBuilder
   func onboardingNumberInput() -> some View {
     #if os(iOS)
+    // Sign-in codes only: lets the keyboard offer the code from Messages or Mail.
     keyboardType(.numberPad)
       .textInputAutocapitalization(.never)
+      .textContentType(.oneTimeCode)
     #else
     self
     #endif
