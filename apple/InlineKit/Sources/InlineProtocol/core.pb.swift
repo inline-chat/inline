@@ -4956,8 +4956,6 @@ public nonisolated struct MessageActionResponseUi: Sendable {
     set {kind = .toast(newValue)}
   }
 
-  /// Reserved for future expandability:
-  /// 3 => open_url
   public var alert: MessageActionAlert {
     get {
       if case .alert(let v)? = kind {return v}
@@ -4966,17 +4964,68 @@ public nonisolated struct MessageActionResponseUi: Sendable {
     set {kind = .alert(newValue)}
   }
 
+  public var openURL: MessageActionResponseOpenUrl {
+    get {
+      if case .openURL(let v)? = kind {return v}
+      return MessageActionResponseOpenUrl()
+    }
+    set {kind = .openURL(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Kind: Equatable, Sendable {
     case toast(MessageActionToast)
-    /// Reserved for future expandability:
-    /// 3 => open_url
     case alert(MessageActionAlert)
+    case openURL(MessageActionResponseOpenUrl)
 
   }
 
   public init() {}
+}
+
+/// Opens a URL for the person who pressed, on the device they pressed on and
+/// within 30 seconds of the press. Apps never act on it from catch-up, on
+/// other devices, or after the window.
+public nonisolated struct MessageActionResponseOpenUrl: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var url: String = String()
+
+  /// The URL carries a credential, such as a one-time login. Inline never logs
+  /// or stores it, synced copies of the answer drop it, and apps never show,
+  /// copy or keep it.
+  public var sensitive: Bool = false
+
+  /// The machine the URL belongs to, for messages ("Mo's MacBook Pro").
+  public var hostLabel: String {
+    get {_hostLabel ?? String()}
+    set {_hostLabel = newValue}
+  }
+  /// Returns true if `hostLabel` has been explicitly set.
+  public var hasHostLabel: Bool {self._hostLabel != nil}
+  /// Clears the value of `hostLabel`. Subsequent reads from it will return its default value.
+  public mutating func clearHostLabel() {self._hostLabel = nil}
+
+  /// Shown instead of opening when a loopback URL is not reachable from the
+  /// pressing device, for example how to turn on Tailscale Serve.
+  public var unreachableText: String {
+    get {_unreachableText ?? String()}
+    set {_unreachableText = newValue}
+  }
+  /// Returns true if `unreachableText` has been explicitly set.
+  public var hasUnreachableText: Bool {self._unreachableText != nil}
+  /// Clears the value of `unreachableText`. Subsequent reads from it will return its default value.
+  public mutating func clearUnreachableText() {self._unreachableText = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _hostLabel: String? = nil
+  fileprivate var _unreachableText: String? = nil
 }
 
 public nonisolated struct MessageActionToast: Sendable {
@@ -27771,6 +27820,10 @@ public nonisolated struct BotChatSettingsButton: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Pressing it opens a page outside Inline: apps mark it and show progress
+  /// until the bot answers.
+  public var opensURL: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -27995,6 +28048,17 @@ public nonisolated struct BotChatSettingsResponse: Sendable {
     set {result = .problem(newValue)}
   }
 
+  /// For the person who pressed: a toast, alert or URL to open. Only answers to
+  /// an item invocation carry it; Inline drops it from settings fetches.
+  public var ui: MessageActionResponseUi {
+    get {_ui ?? MessageActionResponseUi()}
+    set {_ui = newValue}
+  }
+  /// Returns true if `ui` has been explicitly set.
+  public var hasUi: Bool {self._ui != nil}
+  /// Clears the value of `ui`. Subsequent reads from it will return its default value.
+  public mutating func clearUi() {self._ui = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -28004,6 +28068,8 @@ public nonisolated struct BotChatSettingsResponse: Sendable {
   }
 
   public init() {}
+
+  fileprivate var _ui: MessageActionResponseUi? = nil
 }
 
 public nonisolated struct RequestBotChatSettingsInput: Sendable {
@@ -33087,7 +33153,7 @@ nonisolated extension MessageActionConfirm: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActionResponseUi"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}toast\0\u{1}alert\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}toast\0\u{1}alert\0\u{3}open_url\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -33121,6 +33187,19 @@ nonisolated extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProto
           self.kind = .alert(v)
         }
       }()
+      case 3: try {
+        var v: MessageActionResponseOpenUrl?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .openURL(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .openURL(v)
+        }
+      }()
       default: break
       }
     }
@@ -33140,6 +33219,10 @@ nonisolated extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProto
       guard case .alert(let v)? = self.kind else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     }()
+    case .openURL?: try {
+      guard case .openURL(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -33147,6 +33230,55 @@ nonisolated extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProto
 
   public static func ==(lhs: MessageActionResponseUi, rhs: MessageActionResponseUi) -> Bool {
     if lhs.kind != rhs.kind {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageActionResponseOpenUrl: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageActionResponseOpenUrl"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0\u{1}sensitive\0\u{3}host_label\0\u{3}unreachable_text\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.url) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.sensitive) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._hostLabel) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._unreachableText) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.url.isEmpty {
+      try visitor.visitSingularStringField(value: self.url, fieldNumber: 1)
+    }
+    if self.sensitive != false {
+      try visitor.visitSingularBoolField(value: self.sensitive, fieldNumber: 2)
+    }
+    try { if let v = self._hostLabel {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._unreachableText {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageActionResponseOpenUrl, rhs: MessageActionResponseOpenUrl) -> Bool {
+    if lhs.url != rhs.url {return false}
+    if lhs.sensitive != rhs.sensitive {return false}
+    if lhs._hostLabel != rhs._hostLabel {return false}
+    if lhs._unreachableText != rhs._unreachableText {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -66452,18 +66584,29 @@ nonisolated extension BotChatSettingsInfo.Tone: SwiftProtobuf._ProtoNameProvidin
 
 nonisolated extension BotChatSettingsButton: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotChatSettingsButton"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}opens_url\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.opensURL) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.opensURL != false {
+      try visitor.visitSingularBoolField(value: self.opensURL, fieldNumber: 1)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: BotChatSettingsButton, rhs: BotChatSettingsButton) -> Bool {
+    if lhs.opensURL != rhs.opensURL {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -66694,7 +66837,7 @@ nonisolated extension BotChatSettingsProblem.Code: SwiftProtobuf._ProtoNameProvi
 
 nonisolated extension BotChatSettingsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotChatSettingsResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}document\0\u{1}problem\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}document\0\u{1}problem\0\u{1}ui\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -66728,6 +66871,7 @@ nonisolated extension BotChatSettingsResponse: SwiftProtobuf.Message, SwiftProto
           self.result = .problem(v)
         }
       }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._ui) }()
       default: break
       }
     }
@@ -66749,11 +66893,15 @@ nonisolated extension BotChatSettingsResponse: SwiftProtobuf.Message, SwiftProto
     }()
     case nil: break
     }
+    try { if let v = self._ui {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: BotChatSettingsResponse, rhs: BotChatSettingsResponse) -> Bool {
     if lhs.result != rhs.result {return false}
+    if lhs._ui != rhs._ui {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -238,6 +238,8 @@ private struct BotChatSettingsQueuedMutation: Equatable, Sendable {
   let botID: Int64
   let itemID: String
   var value: BotChatSettingsMutationValue?
+  /// When the person pressed; a URL answer opens only soon after it.
+  var pressedAt = Date()
   var staleRetryCount = 0
   var transportRetryCount = 0
 }
@@ -272,6 +274,9 @@ public final class BotChatSettingsCoordinator {
   @ObservationIgnored private let documentCache: BotChatSettingsDocumentCache?
   @ObservationIgnored private let accountID: Int64?
   @ObservationIgnored private let log = Log.scoped("BotChatSettingsCoordinator")
+  /// Shows a bot's answer to a pressed item (toast, alert or URL to open), with
+  /// the time of the press. The view that owns the chat sets it.
+  @ObservationIgnored public var responseUiHandler: (@MainActor (BotResponseUi, Date) -> Void)?
   private var stateByBotID: [Int64: BotChatSettingsBotState] = [:]
   @ObservationIgnored private var didManuallySelectBot = false
   @ObservationIgnored private var generation = 0
@@ -889,6 +894,9 @@ public final class BotChatSettingsCoordinator {
     }
     stateByBotID[mutation.botID] = state
     finishQueuedMutation(mutation, problem: responseProblem)
+    if response.hasUi, let ui = BotResponseUi(response.ui) {
+      responseUiHandler?(ui, mutation.pressedAt)
+    }
   }
 
   private func parseDocument(

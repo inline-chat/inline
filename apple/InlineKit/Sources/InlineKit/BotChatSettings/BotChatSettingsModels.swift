@@ -35,7 +35,8 @@ public enum BotChatSettingsModel {
     case toggle(value: Bool)
     case select(value: String, options: [SelectOption])
     case info(text: String, tone: InfoTone)
-    case button
+    /// `opensURL`: pressing it opens a page outside Inline (the bot answers with a URL).
+    case button(opensURL: Bool = false)
     case folder(
       value: String,
       recentFolders: [FolderOption],
@@ -234,9 +235,9 @@ public extension BotChatSettingsModel.Document {
       case .UNRECOGNIZED: throw BotChatSettingsModelError.unsupportedInfoTone
       }
       control = .info(text: info.text, tone: tone)
-    case .button:
+    case let .button(button):
       guard label != nil else { throw BotChatSettingsModelError.missingLabel(item.id) }
-      control = .button
+      control = .button(opensURL: button.opensURL)
     case let .folder(folder):
       guard label != nil else { throw BotChatSettingsModelError.missingLabel(item.id) }
       guard !folder.recentFolders.isEmpty, folder.recentFolders.count <= BotChatSettingsLimits.folderOptions else {
@@ -337,8 +338,8 @@ public extension BotChatSettingsModel.Document {
         case let (.select(_, options), .string(nextValue))
           where options.contains(where: { $0.value == nextValue && !$0.isDisabled }):
           nextControl = .select(value: nextValue, options: options)
-        case (.button, nil):
-          nextControl = .button
+        case let (.button(opensURL), nil):
+          nextControl = .button(opensURL: opensURL)
         case let (.folder(
           _,
           recentFolders,

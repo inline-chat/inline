@@ -3137,12 +3137,17 @@ extension InlineProtocol.UpdateMessageActionAnswered {
       return trimmed.isEmpty ? nil : trimmed
     }()
     let alert = hasUi ? MessageActionAlertContent(ui) : nil
+    let openURL: BotResponseOpenURL? = {
+      guard hasUi, case let .openURL(open)? = BotResponseUi(ui) else { return nil }
+      return open
+    }()
 
     Task { @MainActor in
       MessageActionInteractionState.shared.finish(
         interactionId: interactionID,
         toastText: toastText,
-        alert: alert
+        alert: alert,
+        openURL: openURL
       )
     }
   }

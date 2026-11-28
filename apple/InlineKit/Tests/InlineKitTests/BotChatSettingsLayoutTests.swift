@@ -10,7 +10,7 @@ struct BotChatSettingsLayoutTests {
     _ id: String,
     label: String? = nil,
     disabledReason: String? = nil,
-    control: BotChatSettingsModel.Control = .button
+    control: BotChatSettingsModel.Control = .button()
   ) -> Item {
     Item(
       id: id,

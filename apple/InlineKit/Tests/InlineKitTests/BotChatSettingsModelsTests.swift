@@ -36,7 +36,7 @@ struct BotChatSettingsModelsTests {
         isDisabled: false
       )]),
       .info(text: "Short guide.", tone: .neutral),
-      .button,
+      .button(),
       .folder(
         value: "workspace-one",
         recentFolders: [

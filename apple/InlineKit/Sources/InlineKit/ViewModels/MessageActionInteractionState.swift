@@ -26,12 +26,25 @@ public final class MessageActionInteractionState {
     public let toastText: String?
     /// A bot's `alert` response, shown as a dialog.
     public let alert: MessageActionAlertContent?
+    /// A bot's `open_url` response, opened if it arrives soon enough after `pressedAt`.
+    public let openURL: BotResponseOpenURL?
+    /// When the press happened on this device.
+    public let pressedAt: Date
 
-    public init(key: LoadingKey, interactionId: Int64, toastText: String?, alert: MessageActionAlertContent? = nil) {
+    public init(
+      key: LoadingKey,
+      interactionId: Int64,
+      toastText: String?,
+      alert: MessageActionAlertContent? = nil,
+      openURL: BotResponseOpenURL? = nil,
+      pressedAt: Date = Date()
+    ) {
       self.key = key
       self.interactionId = interactionId
       self.toastText = toastText
       self.alert = alert
+      self.openURL = openURL
+      self.pressedAt = pressedAt
     }
   }
 
@@ -43,9 +56,11 @@ public final class MessageActionInteractionState {
   private struct PendingFinish: Sendable {
     let toastText: String?
     let alert: MessageActionAlertContent?
+    let openURL: BotResponseOpenURL?
   }
 
   private var loading: Set<LoadingKey> = []
+  private var pressedAtByKey: [LoadingKey: Date] = [:]
   private var keyByInteraction: [Int64: LoadingKey] = [:]
   private var interactionByKey: [LoadingKey: Int64] = [:]
   private var pendingFinishByInteraction: [Int64: PendingFinish] = [:]
@@ -68,6 +83,7 @@ public final class MessageActionInteractionState {
     }
 
     loading.insert(key)
+    pressedAtByKey[key] = Date()
     loadingPublisher.send(loading)
     return true
   }
@@ -89,11 +105,22 @@ public final class MessageActionInteractionState {
 
     if let pendingFinish = pendingFinishByInteraction.removeValue(forKey: interactionId) {
       pendingFinishOrder.removeAll { $0 == interactionId }
-      complete(interactionId: interactionId, key: key, toastText: pendingFinish.toastText, alert: pendingFinish.alert)
+      complete(
+        interactionId: interactionId,
+        key: key,
+        toastText: pendingFinish.toastText,
+        alert: pendingFinish.alert,
+        openURL: pendingFinish.openURL
+      )
     }
   }
 
-  public func finish(interactionId: Int64, toastText: String? = nil, alert: MessageActionAlertContent? = nil) {
+  public func finish(
+    interactionId: Int64,
+    toastText: String? = nil,
+    alert: MessageActionAlertContent? = nil,
+    openURL: BotResponseOpenURL? = nil
+  ) {
     guard interactionId > 0 else {
       return
     }
@@ -103,12 +130,12 @@ public final class MessageActionInteractionState {
       return
     }
     guard let key = keyByInteraction[interactionId] else {
-      bufferFinish(interactionId, PendingFinish(toastText: toastText, alert: alert))
+      bufferFinish(interactionId, PendingFinish(toastText: toastText, alert: alert, openURL: openURL))
       log.trace("Buffered finish for interaction \(interactionId) before mapping was attached")
       return
     }
 
-    complete(interactionId: interactionId, key: key, toastText: toastText, alert: alert)
+    complete(interactionId: interactionId, key: key, toastText: toastText, alert: alert, openURL: openURL)
   }
 
   /// Shows the bot's answer to an agent control (Stop, Resume) through `handler`: the reply can
@@ -144,6 +171,7 @@ public final class MessageActionInteractionState {
       pendingFinishByInteraction.removeValue(forKey: interactionId)
     }
 
+    pressedAtByKey.removeValue(forKey: key)
     if loading.remove(key) != nil {
       loadingPublisher.send(loading)
     }
@@ -165,11 +193,14 @@ public final class MessageActionInteractionState {
     interactionId: Int64,
     key: LoadingKey,
     toastText: String?,
-    alert: MessageActionAlertContent? = nil
+    alert: MessageActionAlertContent? = nil,
+    openURL: BotResponseOpenURL? = nil
   ) {
     keyByInteraction.removeValue(forKey: interactionId)
     interactionByKey.removeValue(forKey: key)
     loading.remove(key)
+    // No press on record (state was reset): too old to open anything.
+    let pressedAt = pressedAtByKey.removeValue(forKey: key) ?? .distantPast
     loadingPublisher.send(loading)
 
     answeredPublisher.send(
@@ -177,7 +208,9 @@ public final class MessageActionInteractionState {
         key: key,
         interactionId: interactionId,
         toastText: toastText,
-        alert: alert
+        alert: alert,
+        openURL: openURL,
+        pressedAt: pressedAt
       )
     )
   }

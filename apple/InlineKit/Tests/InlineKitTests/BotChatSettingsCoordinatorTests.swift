@@ -125,6 +125,46 @@ struct BotChatSettingsCoordinatorTests {
     #expect(coordinator.selectedState.document?.revision == "one")
   }
 
+  @Test("hands a pressed button's URL answer to the view with the press time")
+  func pressedButtonOpensURL() async {
+    let recorder = ResponseUiRecorder()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in dashboardResponse(revision: "one") },
+      itemInvoker: { _, _, _, _, _ in
+        var response = dashboardResponse(revision: "one")
+        response.ui = .with {
+          $0.openURL = .with {
+            $0.url = "http://127.0.0.1:18789/#bootstrapToken=abc"
+            $0.sensitive = true
+            $0.hostLabel = "Mo's MacBook Pro"
+          }
+        }
+        return response
+      }
+    )
+    coordinator.responseUiHandler = { ui, pressedAt in recorder.record(ui, pressedAt) }
+    await coordinator.warmUp()
+    await waitUntil { coordinator.selectedState.phase == .loaded }
+    let dashboard = coordinator.selectedState.document?.sections.flatMap(\.items).first { $0.id == "dashboard" }
+    #expect(dashboard?.control == .button(opensURL: true))
+
+    let before = Date()
+    coordinator.invoke(itemID: "dashboard", value: nil)
+    await waitUntil { recorder.answers.count == 1 }
+
+    guard case let .openURL(open)? = recorder.answers.first?.ui else {
+      Issue.record("expected an open URL answer")
+      return
+    }
+    #expect(open.isSensitive)
+    #expect(open.isLoopback)
+    #expect(open.hostLabel == "Mo's MacBook Pro")
+    #expect(!open.description.contains("bootstrapToken"))
+    #expect(recorder.answers[0].pressedAt >= before)
+  }
+
   @Test("records bots that declare the Output setting")
   func outputModeCapability() async {
     let coordinator = BotChatSettingsCoordinator(
@@ -1051,6 +1091,29 @@ private func folderDocumentResponse(revision: String, includeNew: Bool) -> Inlin
             $0.recentFolders = [.with { $0.value = "workspace-old"; $0.label = "Old" }]
             if includeNew { $0.recentFolders.append(.with { $0.value = "workspace-new"; $0.label = "New" }) }
           })
+        }]
+      }]
+    })
+  }
+}
+
+@MainActor
+private final class ResponseUiRecorder {
+  private(set) var answers: [(ui: BotResponseUi, pressedAt: Date)] = []
+  func record(_ ui: BotResponseUi, _ pressedAt: Date) { answers.append((ui, pressedAt)) }
+}
+
+private func dashboardResponse(revision: String) -> InlineProtocol.BotChatSettingsResponse {
+  .with {
+    $0.result = .document(.with {
+      $0.version = 1
+      $0.revision = revision
+      $0.sections = [.with {
+        $0.id = "agent"
+        $0.items = [.with {
+          $0.id = "dashboard"
+          $0.label = "Open Dashboard"
+          $0.control = .button(.with { $0.opensURL = true })
         }]
       }]
     })
