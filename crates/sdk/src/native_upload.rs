@@ -205,7 +205,13 @@ impl NativeUploadTransport for Transport<'_> {
         &mut self,
         upload_id: Vec<u8>,
     ) -> Result<proto::FinishUploadResult, NativeUploadError> {
-        let input = proto::FinishUploadInput { upload_id };
+        // The thumbnail is named at create; finish names none of its own.
+        let input = proto::FinishUploadInput {
+            upload_id,
+            thumbnail_file_unique_id: None,
+            // The create already carried the size.
+            byte_count: None,
+        };
         Ok(match self {
             Self::V2(client) => client.call(input).await?,
             Self::V2Session(client) => client.call(input).await?,
@@ -394,6 +400,8 @@ async fn upload_with_processing_timeout(
             metadata,
             // The CLI streams parts; it does not use the single-call inline path.
             inline_data: None,
+            // The server picks the ID: the CLI waits for the create's reply.
+            upload_id: None,
         })
         .await?;
     if !valid_upload_geometry(&created, byte_count) {
@@ -579,6 +587,8 @@ async fn save_part(
                 upload_id: upload_id.to_vec(),
                 part_index: index,
                 data: part.clone(),
+                // Whole parts.
+                offset: None,
             })
             .await;
         let Err(error) = save else {
@@ -654,6 +664,8 @@ mod tests {
             expires_at: 1_900_000_000,
             accepted_parts: vec![],
             complete: None,
+            piece_granularity: None,
+            size_at_finish: None,
         };
         assert!(!valid_upload_geometry(&created, 1));
 
@@ -710,6 +722,8 @@ mod tests {
                 expires_at: 1_900_000_000,
                 accepted_parts: vec![],
                 complete: None,
+                piece_granularity: None,
+                size_at_finish: None,
             })
         }
 
@@ -859,6 +873,8 @@ mod tests {
                 expires_at: 1_900_000_000,
                 accepted_parts: vec![],
                 complete: None,
+                piece_granularity: None,
+                size_at_finish: None,
             })
         }
 
