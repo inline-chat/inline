@@ -528,9 +528,24 @@ message MessageActionResponseUi {
   oneof kind {
     MessageActionToast toast = 1;
     MessageActionAlert alert = 2;
-    // Reserved for future expandability:
-    // 3 => open_url
+    MessageActionResponseOpenUrl open_url = 3;
   }
+}
+
+// Opens a URL for the person who pressed, on the device they pressed on and
+// within 30 seconds of the press. Apps never act on it from catch-up, on
+// other devices, or after the window.
+message MessageActionResponseOpenUrl {
+  string url = 1;
+  // The URL carries a credential, such as a one-time login. Inline never logs
+  // or stores it, synced copies of the answer drop it, and apps never show,
+  // copy or keep it.
+  bool sensitive = 2;
+  // The machine the URL belongs to, for messages ("Mo's MacBook Pro").
+  optional string host_label = 3;
+  // Shown instead of opening when a loopback URL is not reachable from the
+  // pressing device, for example how to turn on Tailscale Serve.
+  optional string unreachable_text = 4;
 }
 
 message MessageActionToast { string text = 1; }
@@ -6261,7 +6276,11 @@ message BotChatSettingsInfo {
   Tone tone = 2;
 }
 
-message BotChatSettingsButton {}
+message BotChatSettingsButton {
+  // Pressing it opens a page outside Inline: apps mark it and show progress
+  // until the bot answers.
+  bool opens_url = 1;
+}
 
 // A host-local workspace selector. Values are opaque bot-owned identifiers;
 // local filesystem paths must not be placed in this document or mutations.
@@ -6316,6 +6335,9 @@ message BotChatSettingsResponse {
     BotChatSettingsDocument document = 1;
     BotChatSettingsProblem problem = 2;
   }
+  // For the person who pressed: a toast, alert or URL to open. Only answers to
+  // an item invocation carry it; Inline drops it from settings fetches.
+  optional MessageActionResponseUi ui = 3;
 }
 
 message RequestBotChatSettingsInput {

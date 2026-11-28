@@ -4529,7 +4529,9 @@ impl SdkBackend {
                         Some(proto::message_action_response_ui::Kind::Toast(toast)) => {
                             trimmed_option(Some(toast.text))
                         }
-                        Some(proto::message_action_response_ui::Kind::Alert(_)) | None => None,
+                        Some(proto::message_action_response_ui::Kind::Alert(_))
+                        | Some(proto::message_action_response_ui::Kind::OpenUrl(_))
+                        | None => None,
                     });
                     events.push(ClientEvent::MessageActionAnswered {
                         interaction_id: InlineId::new(update.interaction_id),

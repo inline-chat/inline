@@ -160,6 +160,7 @@ pub(super) fn response_to_proto(
             }
             BotChatSettingsResponse::Problem(problem) => Result::Problem(problem_to_proto(problem)),
         }),
+        ui: None,
     }
 }
 
@@ -254,7 +255,7 @@ fn item_to_proto(item: BotChatSettingsItem) -> proto::BotChatSettingsItem {
             text,
             tone: info_tone_to_proto(tone) as i32,
         }),
-        BotChatSettingsControl::Button => Control::Button(proto::BotChatSettingsButton {}),
+        BotChatSettingsControl::Button => Control::Button(proto::BotChatSettingsButton { opens_url: false }),
         BotChatSettingsControl::Folder(folder) => Control::Folder(folder_to_proto(folder)),
     };
     proto::BotChatSettingsItem {
@@ -567,7 +568,10 @@ mod tests {
 
     #[test]
     fn empty_result_is_a_protocol_mismatch() {
-        let error = response_from_proto(Some(proto::BotChatSettingsResponse { result: None }))
+        let error = response_from_proto(Some(proto::BotChatSettingsResponse {
+            result: None,
+            ui: None,
+        }))
             .expect_err("missing result must fail");
         assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
     }
