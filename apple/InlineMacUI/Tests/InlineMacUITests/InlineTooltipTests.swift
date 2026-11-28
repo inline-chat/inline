@@ -182,10 +182,19 @@ struct InlineTooltipTests {
       #expect(glassView.tintColor == nil)
       #expect(glassView.cornerRadius == 12)
     }
-    #expect(bubble.layer?.shadowOpacity == 0.14)
-    #expect(bubble.layer?.shadowRadius == 7)
-    #expect(bubble.layer?.shadowOffset == CGSize(width: 0, height: -2))
-    #expect(bubble.layer?.shadowPath != nil)
+    // The shadow sits on a sublayer masked to outside the body, so translucent glass does not sample it.
+    let shadowClip = try #require(bubble.layer?.sublayers?.first { $0.mask is CAShapeLayer })
+    let shadowClipMask = try #require(shadowClip.mask as? CAShapeLayer)
+    let shadowLayer = try #require(shadowClip.sublayers?.first)
+    #expect(shadowLayer.shadowOpacity == 0.14)
+    #expect(shadowLayer.shadowRadius == 7)
+    #expect(shadowLayer.shadowOffset == CGSize(width: 0, height: -2))
+    #expect(shadowLayer.shadowPath != nil)
+    #expect(shadowLayer.frame == surfaceView.frame)
+    #expect(shadowClipMask.fillRule == .evenOdd)
+    let clipPath = try #require(shadowClipMask.path)
+    #expect(!clipPath.contains(CGPoint(x: surfaceView.frame.midX, y: surfaceView.frame.midY), using: .evenOdd))
+    #expect(clipPath.contains(CGPoint(x: 1, y: 1), using: .evenOdd))
   }
 
   @Test("Description content expands below the tooltip title")
