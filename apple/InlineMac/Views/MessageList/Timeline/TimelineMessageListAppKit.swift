@@ -1053,6 +1053,9 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
   }
 
   override func loadView() {
+    #if DEBUG
+    Self.journeyCurrent = self
+    #endif
     // The fling's shape: NSScrollView's (AppKit's calculator from 0.9 × the fingers' speed), or, to compare, the
     // system's momentum stream (about twice the travel):
     // `defaults write chat.inline.InlineMac.devbuild TimelineSystemMomentumFling -bool YES`, then open a chat.
@@ -2874,11 +2877,66 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
     Theme.messageGroupSpacing + Theme.messageOuterVerticalPadding + Theme.messageNameLabelHeight
   }
 
-  /// A click on a day pill: the day's row to the top (Telegram scrolls to the day's start the same way), animated.
+  /// A click on a day pill: to the day's start, with its day row at the top. The day's first message is found first
+  /// (`ChatDayStart`: older history is fetched when a hole lies before the first one cached), then the list goes there
+  /// as a jump to a message does: a scroll when it is loaded, otherwise its window is loaded and the screen slides out
+  /// as the day slides in from its side (Mo, 2026-11-27: it went only as far up as was loaded).
   private func scrollToDayStart(_ dayStart: Date) {
-    let id = RowID.daySeparator(dayStart: dayStart)
-    guard chatRows.rows.contains(id) else { return }
-    list.apply(TimelineTransaction(scroll: .to(id, .top(0)), timing: .standard))
+    let revision = beginJump()
+    guard hasPlacedInitialRows, !isDisposed else { return }
+    let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86_400)
+    let peer = peerId
+    jumpTask = Task { @MainActor [weak self] in
+      do {
+        let first = try await ChatDayStart.firstMessageId(peer: peer, dayStart: dayStart, dayEnd: dayEnd)
+        guard let self, !Task.isCancelled, !isDisposed, jumpRevision == revision else { return }
+        jumpTask = nil
+        guard let first else { return }
+        showDay(dayStart, firstMessageId: first)
+      } catch is CancellationError {
+        return
+      } catch {
+        guard let self, !Task.isCancelled, !isDisposed, jumpRevision == revision else { return }
+        jumpTask = nil
+        log.error("Failed to find the start of a day", error: error)
+      }
+    }
+  }
+
+  #if DEBUG
+  /// The list showing a chat now, for the journey harness's day jumps.
+  static weak var journeyCurrent: TimelineMessageListAppKit?
+  func journeyJumpToDay(_ dayStart: Date) { scrollToDayStart(dayStart) }
+  /// Back to the chat's newest message as the jump-to-latest button goes (a day jump leaves an older window).
+  func journeyToLatest() { scrollToLatest() }
+  /// The loaded message ids, oldest first (journeys).
+  var journeyMessageIds: [Int64] { messages.map(\.message.messageId).filter { $0 > 0 } }
+  #endif
+
+  /// The day's row (or its first message's, when the window starts there) at the top of the usable area.
+  private func showDay(_ dayStart: Date, firstMessageId: Int64) {
+    func dayRow() -> RowID? {
+      let day = RowID.daySeparator(dayStart: dayStart)
+      return chatRows.rows.contains(day) ? day : row(forServerId: firstMessageId)
+    }
+    let towards = direction(to: firstMessageId)
+    // Loaded: a scroll (the engine slides when it is far). The message is the day's proven first, so a window that
+    // starts at it still lands on the day's start; older rows page in as the reader goes up.
+    if row(forServerId: firstMessageId) != nil, let target = dayRow() {
+      list.apply(TimelineTransaction(scroll: .to(target, .top(0)), timing: .standard, towards: towards))
+      return
+    }
+    guard chatRows.loadLocalWindowAroundMessage(messageId: firstMessageId, publish: false) else { return }
+    _ = chatRows.syncFromViewModelAfterManualMutation()
+    newWindow()
+    pruneRowCaches()
+    chatRows.setHistoryAnchor(firstMessageId)
+    guard let target = dayRow() else { return }
+    // History all along: it comes in with the jump, sliding from the side it lies on.
+    list.apply(TimelineTransaction(
+      rows: chatRows.rows, coverage: coverage(), scroll: .to(target, .top(0)), timing: .standard, arrives: false,
+      towards: towards
+    ))
   }
 
   /// A click on a sender's avatar opens their profile (the table list's message view does the same), not in a DM.

@@ -59,6 +59,8 @@ enum TimelineJourneyRunner {
     Scenario(name: "resize-rich", run: runResizeRich),
     Scenario(name: "resize-text", run: runResizeText),
     Scenario(name: "reply", run: runReply),
+    Scenario(name: "touch-stop", run: runTouchStop),
+    Scenario(name: "day-jump", run: runDayJump),
     Scenario(name: "resize-passage", run: runResizePassage),
     Scenario(name: "stream-long", run: runStreamLong),
     Scenario(name: "composer-history", run: runComposerHistory),
@@ -446,6 +448,8 @@ enum TimelineJourneyRunner {
     guard let messageId = try? PerfHarnessFixture.receiveMessage(peer: richChat, from: 4),
           let ref = try? PerfHarnessFixture.messages(peer: richChat, ids: [messageId]).first
     else { return j.fail("no message") }
+    // Gone after, or later scenarios in this chat find only the passage at its newest end.
+    defer { _ = try? PerfHarnessFixture.deleteMessages(peer: richChat, messageIds: [messageId]) }
     let row = Row.message(id: ref.globalId)
     let long = PerfHarnessFixture.richLongSnapshot()
     _ = try? PerfHarnessFixture.editRichMessage(peer: richChat, messageId: messageId, text: long.text, blocks: long.blocks)
@@ -509,7 +513,10 @@ enum TimelineJourneyRunner {
     let usableBottom = list.bounds.height - list.bottomInset
     guard let row = list.placedViews.compactMap({ id, _ in list.presentedFrame(for: id).map { (id, $0) } })
       .filter({ $0.1.maxY < usableBottom - 4 }).max(by: { $0.1.maxY < $1.1.maxY })?.0
-    else { return j.fail("no row above the composer") }
+    else {
+      await j.capture("no-row")
+      return j.fail("no row above the composer")
+    }
     func gap() -> CGFloat? {
       guard let frame = list.presentedFrame(for: row) else { return nil }
       return list.convert(NSPoint(x: 0, y: frame.maxY), to: nil).y - composerTop()
@@ -549,6 +556,8 @@ enum TimelineJourneyRunner {
     guard let messageId = try? PerfHarnessFixture.receiveMessage(peer: shortChat, from: 4),
           let ref = try? PerfHarnessFixture.messages(peer: shortChat, ids: [messageId]).first
     else { return j.fail("no message") }
+    // Gone after, or later scenarios in this chat find only the reply at its newest end.
+    defer { _ = try? PerfHarnessFixture.deleteMessages(peer: shortChat, messageIds: [messageId]) }
     let row = Row.message(id: ref.globalId)
     var text = "A long reply."
     for step in 0 ..< 200 { text += (step % 6 == 5 ? "\n\n" : " ") + Journey.sentence(step) }
@@ -586,6 +595,7 @@ enum TimelineJourneyRunner {
     guard let messageId = try? PerfHarnessFixture.receiveMessage(peer: shortChat, from: 4),
           let ref = try? PerfHarnessFixture.messages(peer: shortChat, ids: [messageId]).first
     else { return j.fail("no message") }
+    defer { _ = try? PerfHarnessFixture.deleteMessages(peer: shortChat, messageIds: [messageId]) }
     let row = Row.message(id: ref.globalId)
     var text = "A long read."
     for step in 0 ..< 200 { text += (step % 6 == 5 ? "\n\n" : " ") + Journey.sentence(step) }
@@ -1313,9 +1323,12 @@ enum TimelineJourneyRunner {
       return text
     }
     var longRow: Row?
+    var added: [Int64] = []
+    defer { _ = try? PerfHarnessFixture.deleteMessages(peer: shortChat, messageIds: added) }
     for (index, sentences) in [1300, 100, 100, 100].enumerated() {
       guard let messageId = try? PerfHarnessFixture.receiveMessage(peer: shortChat, from: 4),
             let ref = try? PerfHarnessFixture.messages(peer: shortChat, ids: [messageId]).first else { continue }
+      added.append(messageId)
       _ = try? PerfHarnessFixture.editMessage(peer: shortChat, messageId: messageId, text: text(sentences))
       if index == 0 { longRow = Row.message(id: ref.globalId) }
     }
@@ -1394,6 +1407,93 @@ enum TimelineJourneyRunner {
     j.result["openSeries"] = series
     state.clearReplyingToMsgId()
     await Journey.sleep(ms: 400)
+  }
+
+  /// A day pill's jump (Mo, 2026-11-27: "click date badge doesn't take me to beginning of the day, it just goes as far
+  /// up as loaded"): to a day wholly older than the loaded window, then to the day only partly loaded at the window's
+  /// top. Each should land with the day's row at the top and the day's first message (from the database) under it,
+  /// with no blank frame through the slide.
+  static func runDayJump(_ j: Journey) async {
+    await j.show(longChat)
+    guard let list = j.list(), let shell = TimelineMessageListAppKit.journeyCurrent else { return j.fail("no list") }
+    await j.toNewest(list)
+    await j.untilRest(list)
+    let calendar = Calendar.autoupdatingCurrent
+    let all = (try? await AppDatabase.shared.reader.read { db -> [(Int64, Date)] in
+      guard let chat = try Chat.filter(Column("peerUserId") == 2).fetchOne(db) else { return [] }
+      return try Message.filter(Column("chatId") == chat.id && Column("messageId") > 0)
+        .order(Column("messageId").asc).fetchAll(db).map { ($0.messageId, $0.date) }
+    }) ?? []
+    guard let oldestLoaded = shell.journeyMessageIds.first,
+          let oldestDate = all.first(where: { $0.0 == oldestLoaded })?.1
+    else { return j.fail("no messages") }
+    func firstOfDay(_ day: Date) -> Int64? {
+      all.first { calendar.startOfDay(for: $0.1) == day }?.0
+    }
+    let partialDay = calendar.startOfDay(for: oldestDate)
+    let olderDays = Set(all.filter { $0.0 < oldestLoaded }.map { calendar.startOfDay(for: $0.1) })
+      .filter { $0 < partialDay }.sorted()
+    var cases: [(String, Date)] = [("partial", partialDay)]
+    if let far = olderDays.dropLast(2).last ?? olderDays.first { cases.insert(("unloaded", far), at: 0) }
+    var results: [String: Any] = [:]
+    for (name, day) in cases {
+      let expected = firstOfDay(day)
+      let loadedBefore = shell.journeyMessageIds.contains(expected ?? -1)
+      var blank: [String: Any] = [:]
+      blank = await j.measure(blank: true) {
+        shell.journeyJumpToDay(day)
+        await Journey.sleep(ms: 900)
+        await j.untilRest(list)
+      }
+      let row = Row.daySeparator(dayStart: day)
+      let viewport = list.timelineLayout.viewport
+      let top = list.timelineLayout.placement(for: row).map { Journey.round(Double($0.y - viewport.usableTop)) }
+      let ids = shell.journeyMessageIds
+      let firstShown = ids.first { id in
+        all.first(where: { $0.0 == id }).map { calendar.startOfDay(for: $0.1) == day } ?? false
+      }
+      results[name] = [
+        "expected": expected ?? -1, "firstOfDayInWindow": firstShown ?? -1, "dayRowTopPt": top ?? "not placed",
+        "loadedBefore": loadedBefore, "blankFrames": blank["blankFrames"] ?? -1, "lostFrames": blank["lostFrames"] ?? -1,
+      ]
+      await j.capture("day-\(name)")
+      // The window is the day's now: back to the chat's newest as the button goes, for the next case and scenario.
+      shell.journeyToLatest()
+      await Journey.sleep(ms: 900)
+      await j.untilRest(list)
+    }
+    j.result["jumps"] = results
+  }
+
+  /// A finger landing on the trackpad mid-fling (Mo, 2026-11-27: "one tap or click on touchpad should stop it as
+  /// native nsscrollview has this"): the momentum stream ends early, and the content should stop within a frame. Also
+  /// a click during a fling. Travel is measured on a row's shown top from 20 ms after the stop to 500 ms after.
+  static func runTouchStop(_ j: Journey) async {
+    await j.show(longChat)
+    guard let list = j.list() else { return j.fail("no timeline list") }
+    await j.toNewest(list)
+    await j.untilRest(list)
+    /// Travel before the cut (-1: the row it started on left the screen), then from 20 ms after it to 500 ms after.
+    func run(cuts: Bool) async -> (before: Double, after: Double)? {
+      let anchor = j.readingRow(list)
+      let origin = anchor.flatMap { list.presentedFrame(for: $0)?.minY }
+      await j.flick(list, dy: 40, count: 6, cutMs: 250, cuts: cuts)
+      await Journey.sleep(ms: 20)
+      let moved = anchor.flatMap { id in origin.flatMap { o in list.presentedFrame(for: id).map { abs($0.minY - o) } } }
+      guard let row = j.readingRow(list), let start = list.presentedFrame(for: row)?.minY else { return nil }
+      await Journey.sleep(ms: 480)
+      let end = list.presentedFrame(for: row)?.minY ?? start
+      await j.untilRest(list)
+      await j.toNewest(list)
+      return (Journey.round(Double(moved ?? -1)), Journey.round(Double(abs(end - start))))
+    }
+    var cut: [[Double]] = []
+    for _ in 0 ..< 3 {
+      if let r = await run(cuts: true) { cut.append([r.before, r.after]) }
+    }
+    j.result["cut_beforeAfterPt"] = cut
+    // The same flick left to run out, measured at the same moment, for scale.
+    if let r = await run(cuts: false) { j.result["uncut_beforeAfterPt"] = [r.before, r.after] }
   }
 
   /// The composer growing line by line and clearing: the newest row's bottom should keep its distance from the
@@ -1645,7 +1745,10 @@ enum TimelineJourneyRunner {
     let (selection, host, rows) = found
     let candidates = textRows(rows)
     j.result["textRowsOnScreen"] = candidates.count
-    guard candidates.count >= 3 else { return j.fail("fewer than 3 text rows on screen") }
+    guard candidates.count >= 3 else {
+      await j.capture("few-rows")
+      return j.fail("fewer than 3 text rows on screen")
+    }
     let picked = Array(candidates.prefix(3))
     let first = picked[0].texts[0]
     let last = picked[2].texts[picked[2].texts.count - 1]
@@ -1708,16 +1811,42 @@ enum TimelineJourneyRunner {
     let (_, host, rows) = found
     guard let region = rows.autoscrollRegion(insetsOnly: true) else { return j.fail("no rows region") }
     // Incoming messages on screen (left aligned): the row's far side is background, where a drag selects messages.
-    let incoming = rows.placedRows.compactMap { row -> (Int, NSPoint)? in
-      guard let cell = rows.cell(atRow: row), let message = host.textSelectionMessage(atRow: row),
-            message.message.out != true, controller.canSelectMessage(atRow: row) else { return nil }
-      let frame = cell.convert(cell.bounds, to: nil)
-      guard frame.minY >= region.minY, frame.maxY <= region.maxY else { return nil }
-      let point = NSPoint(x: region.maxX - 24, y: frame.midY)
-      guard let hit = rows.hit(atWindowPoint: point), !(hit is NSTextView), !(hit is any MessageTextSurface) else { return nil }
-      return (row, point)
-    }.sorted { $0.1.y > $1.1.y }
+    var skipped: [String: Int] = [:]
+    func incomingOnScreen() -> [(Int, NSPoint)] {
+      skipped = [:]
+      return rows.placedRows.compactMap { row -> (Int, NSPoint)? in
+        guard let cell = rows.cell(atRow: row), let message = host.textSelectionMessage(atRow: row),
+              message.message.out != true, controller.canSelectMessage(atRow: row) else {
+          skipped["notIncoming", default: 0] += 1
+          return nil
+        }
+        let frame = cell.convert(cell.bounds, to: nil)
+        guard frame.minY >= region.minY, frame.maxY <= region.maxY else {
+          skipped["clipped", default: 0] += 1
+          return nil
+        }
+        let point = NSPoint(x: region.maxX - 24, y: frame.midY)
+        guard let hit = rows.hit(atWindowPoint: point) else {
+          skipped["noHit", default: 0] += 1
+          return nil
+        }
+        guard !(hit is NSTextView), !(hit is any MessageTextSurface) else {
+          skipped["text:\(type(of: hit))", default: 0] += 1
+          return nil
+        }
+        return (row, point)
+      }.sorted { $0.1.y > $1.1.y }
+    }
+    // Long messages at the newest end fit fewer whole rows: a little further up, as a reader would.
+    var incoming = incomingOnScreen()
+    for _ in 0 ..< 3 where incoming.count < 4 {
+      guard let list = j.list() else { break }
+      await j.flick(list, dy: 12, count: 4)
+      await j.untilRest(list)
+      incoming = incomingOnScreen()
+    }
     j.result["incomingRowsOnScreen"] = incoming.count
+    j.result["skippedRows"] = skipped
     guard incoming.count >= 4 else { return j.fail("fewer than 4 incoming rows on screen") }
     let from = incoming[0], to = incoming[3]
     await pressAndDrag(j, from: from.1, to: to.1)
@@ -2073,6 +2202,41 @@ final class Journey {
     event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(dy.rounded()))
     event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: dy)
     return event
+  }
+
+  /// A flick whose momentum stream a finger cuts `cutMs` after the lift (the system ends it at once, deltas still
+  /// large). Returns once the momentum-ended event is posted.
+  func flick(_ list: List, dy: Double, count: Int, cutMs: Double, cuts: Bool = true) async {
+    post(list, Self.trackpad(0, phase: 128))
+    for index in 0 ..< count {
+      post(list, Self.trackpad(dy, phase: index == 0 ? 1 : 2))
+      await Self.sleep(ms: 8.33)
+    }
+    post(list, Self.trackpad(0, phase: 4))
+    await Self.sleep(ms: 5)
+    var delta = dy * 1.5
+    var elapsed = 0.0
+    post(list, Self.trackpad(delta, phase: 0, momentum: 1))
+    while elapsed < cutMs {
+      await Self.sleep(ms: 16.67)
+      elapsed += 16.67
+      delta *= 0.95
+      post(list, Self.trackpad(delta, phase: 0, momentum: 2))
+    }
+    guard cuts else {
+      // Uncut: the stream runs out on its own after this returns, as the system's does.
+      Task { @MainActor [delta] in
+        var delta = delta
+        while abs(delta) >= 1 {
+          await Self.sleep(ms: 16.67)
+          delta *= 0.95
+          self.post(list, Self.trackpad(delta, phase: 0, momentum: 2))
+        }
+        self.post(list, Self.trackpad(0, phase: 0, momentum: 3))
+      }
+      return
+    }
+    post(list, Self.trackpad(0, phase: 0, momentum: 3))
   }
 
   /// A flick: `count` finger events of `dy` at 120 Hz, the lift, then the system's momentum at 60 Hz (first
