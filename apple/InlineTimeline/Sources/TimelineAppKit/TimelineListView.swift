@@ -891,10 +891,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: NSView {
     return nil
   }
 
-  /// Stops a fling where it is on screen.
+  /// Stops a fling where it is on screen (past an end, it returns), and reports the stop.
   public func stopScrolling() {
-    catchFlight()
-    caughtFlight = false
+    stopAndSettle()
   }
 
   /// Starts a fling as if a trackpad let go at this velocity (points per second, positive: content moves down).

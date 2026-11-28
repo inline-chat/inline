@@ -17,9 +17,7 @@ extension TimelineListView {
     if flight != nil || coast != nil, let type = NSApp.currentEvent?.type,
        type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown
     {
-      catchFlight()
-      caughtFlight = false
-      rest()
+      stopAndSettle()
     }
     guard let superview else { return super.hitTest(point) }
     let local = convert(point, from: superview)
@@ -94,6 +92,7 @@ extension TimelineListView {
   func keyScroll(by delta: CGFloat) {
     catchFlight()
     caughtFlight = false
+    onScrollBegan?()
     showIndicator()
     showFloatingHeader()
     var update = TimelineUpdate<ID>(viewport: viewport(), scroll: .by(delta))
@@ -149,9 +148,7 @@ extension TimelineListView {
         // its deltas still large; NSScrollView stops there (Mo's recorded gestures: 9 of 13 flings ended so, 0.18–0.43 s
         // after the lift). A stream that runs out ends slow, and the fling goes on to its own end.
         momentumSpeed = 0
-        catchFlight()
-        caughtFlight = false
-        rest()
+        stopAndSettle()
         return
       }
       if !ends {
@@ -182,6 +179,11 @@ extension TimelineListView {
       horizontalTaken = false
       gestureIsHorizontal = abs(dx) > abs(dy) * 1.5
       if gestureIsHorizontal {
+        // A fling the touch caught stays stopped: settled here, as a lift without moving does (past an end, it returns).
+        if caughtFlight {
+          caughtFlight = false
+          release(velocity: 0)
+        }
         routeHorizontal(event)
         return
       }
@@ -204,8 +206,8 @@ extension TimelineListView {
     }
     if phase.contains(.ended) || phase.contains(.cancelled) {
       if gestureIsHorizontal {
+        // Kept until the next gesture begins: its momentum goes where it went (and never stops a fling of the list's).
         routeHorizontal(event)
-        gestureIsHorizontal = false
         return
       }
       if isTracking {
@@ -257,7 +259,8 @@ extension TimelineListView {
     stopScrollMotions()
     catchFlight()
     caughtFlight = false
-    onScrollBegan?()
+    // One began per series of notches, as its rest reports one end.
+    if restWork == nil { onScrollBegan?() }
     showIndicator()
     showFloatingHeader()
     var update = TimelineUpdate<ID>(viewport: viewport(), scroll: .by(delta))
@@ -312,6 +315,15 @@ extension TimelineListView {
       gestureRecord = record
     }
     drag(by: delta)
+  }
+
+  /// Stops a fling or a bounce where it shows and settles there, as a touch that lifts without moving does: inside the
+  /// ends it rests and reports the stop; past an end it returns (snapping back would jump up to half a viewport).
+  func stopAndSettle() {
+    let moving = flight != nil || coast != nil
+    catchFlight()
+    caughtFlight = false
+    if moving { release(velocity: 0) }
   }
 
   /// Whether the momentum stream ending now was cut short: its latest event still moved faster than a stream running
