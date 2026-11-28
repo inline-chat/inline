@@ -91,6 +91,10 @@ final class MessageMenuActions: NSObject {
     let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
       ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
     }
+    // Same rule as the gallery and Chat Info: members can't delete others' messages in a space.
+    guard MessageDeletePolicy.checker(peer: message.peerId)(message) else {
+      return UIMenu(children: [replyAction])
+    }
     let deleteAction = UIAction(
       title: "Delete",
       image: UIImage(systemName: "trash"),
@@ -262,13 +266,16 @@ final class MessageMenuActions: NSObject {
       }
     }
 
-    let deleteAction = UIAction(
-      title: "Delete",
-      image: UIImage(systemName: "trash"),
-      attributes: .destructive
-    ) { [weak self] _ in
-      self?.showDeleteConfirmation(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
-    }
+    // Same rule as the gallery and Chat Info: members can't delete others' messages in a space.
+    let deleteAction: UIAction? = MessageDeletePolicy.checker(peer: message.peerId)(message)
+      ? UIAction(
+        title: "Delete",
+        image: UIImage(systemName: "trash"),
+        attributes: .destructive
+      ) { [weak self] _ in
+        self?.showDeleteConfirmation(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
+      }
+      : nil
 
     var menuChildren: [UIMenuElement] = []
     var basicActions = actions
@@ -287,7 +294,9 @@ final class MessageMenuActions: NSObject {
       ))
     }
 
-    menuChildren.append(UIMenu(title: "", options: .displayInline, children: [deleteAction]))
+    if let deleteAction {
+      menuChildren.append(UIMenu(title: "", options: .displayInline, children: [deleteAction]))
+    }
 
     if let via = fullMessage.viaPresentation {
       let viaAction = UIAction(
