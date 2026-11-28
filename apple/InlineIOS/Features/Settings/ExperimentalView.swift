@@ -1,14 +1,9 @@
-import Auth
 import InlineKit
 import InlineIOSUI
 import InlineMessageLayout
 import SwiftUI
 
 struct ExperimentalView: View {
-  @ObservedObject private var auth = Auth.shared
-  @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
-  private var nativeFileDownloadsEnabled = false
-
   @AppStorage(ExperimentalFeatureFlags.newThreadComposerKey)
   private var newThreadComposerEnabled = false
 
@@ -28,11 +23,6 @@ struct ExperimentalView: View {
     List {
       // Use the same purpose-based groups as macOS; see AGENTS.md when adding experiments.
       Section {
-        SettingsItem(icon: "arrow.down.document", iconColor: .blue, title: "Native File Downloads") {
-          Toggle("Native File Downloads", isOn: $nativeFileDownloadsEnabled)
-            .labelsHidden()
-            .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
-        }
         SettingsItem(icon: "arrow.up.circle", iconColor: .green, title: "Upload While Writing") {
           Toggle("Upload While Writing", isOn: $earlyUploadsEnabled)
             .labelsHidden()
@@ -40,16 +30,7 @@ struct ExperimentalView: View {
       } header: {
         Text("Files")
       } footer: {
-        VStack(alignment: .leading, spacing: 6) {
-          if nativeFileDownloadsAvailable {
-            Text("Download documents and videos over the realtime connection. Other media use standard downloads. Turn off to use standard downloads for everything.")
-          } else if nativeFileDownloadsEnabled {
-            Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
-          } else {
-            Text("Sign in to use native file downloads.")
-          }
-          Text("Upload While Writing: photos start uploading when you attach them, so they send sooner. Removing one deletes what was uploaded. Off: uploads start when you send.")
-        }
+        Text("Upload While Writing: photos start uploading when you attach them, so they send sooner. Removing one deletes what was uploaded. Off: uploads start when you send.")
       }
 
       Section {
@@ -114,10 +95,6 @@ struct ExperimentalView: View {
     .listStyle(.insetGrouped)
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
-  }
-
-  private var nativeFileDownloadsAvailable: Bool {
-    auth.getIsLoggedIn()
   }
 }
 

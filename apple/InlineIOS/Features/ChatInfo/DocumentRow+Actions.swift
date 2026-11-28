@@ -43,7 +43,6 @@ extension DocumentRow {
       "UI downloadFile tapped: docId=\(documentInfo.id) msgId=\(msg.id) fileName=\(document.fileName ?? "nil") size=\(document.size ?? -1) mime=\(document.mimeType ?? "nil") cdnUrl=\(document.cdnUrl ?? "nil")"
     )
 
-    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
     FileDownloader.shared.downloadDocument(document: documentInfo, for: msg, priority: .userInitiated) { result in
       DispatchQueue.main.async {
         Log.shared.debug("UI downloadFile completion: docId=\(documentInfo.id) result=\(result)")
@@ -53,7 +52,7 @@ extension DocumentRow {
           case let .failure(error):
             Log.shared.error("Document download failed:", error: error)
             documentState = .needsDownload
-            if !FileDownloader.isCancellation(error), startedNativeDownload {
+            if !FileDownloader.isCancellation(error) {
               ToastManager.shared.showToast(
                 "File download failed",
                 description: "Please try again.",
