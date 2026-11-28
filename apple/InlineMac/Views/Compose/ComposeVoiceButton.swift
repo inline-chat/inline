@@ -9,6 +9,8 @@ final class ComposeVoiceButton: NSView {
   private let glassButton: NSButton?
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
+  /// Last mode drawn, so unrelated defaults writes skip the menu and image rebuild.
+  private var appliedInputMode: ComposeVoiceInputMode?
 
   var onClick: (() -> Void)?
   var onModeChanged: (() -> Void)?
@@ -145,12 +147,21 @@ final class ComposeVoiceButton: NSView {
     onClick?()
   }
 
+  /// `UserDefaults.didChangeNotification` fires for every defaults write in the
+  /// process (Focus reporting writes on each poll), so rebuild only when the
+  /// voice input mode itself changed.
   @objc nonisolated private func inputPreferencesDidChange() {
-    Task { @MainActor [weak self] in self?.refreshInputMode() }
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      let selected = self.fixedInputMode ?? ComposeVoiceInputMode.selected
+      guard selected != self.appliedInputMode else { return }
+      self.refreshInputMode()
+    }
   }
 
   private func refreshInputMode() {
     let selected = fixedInputMode ?? ComposeVoiceInputMode.selected
+    appliedInputMode = selected
     let iconSize = presentation == .accessoryBar ? mode.silentIconPointSize : mode.voiceButtonIconPointSize
     let image = NSImage(systemSymbolName: selected.symbol, accessibilityDescription: selected.actionTitle)?
       .withSymbolConfiguration(.init(pointSize: iconSize, weight: .medium))
