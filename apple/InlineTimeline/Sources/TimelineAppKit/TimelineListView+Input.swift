@@ -143,6 +143,22 @@ extension TimelineListView {
     // gesture's momentum goes where the gesture went.
     if !event.momentumPhase.isEmpty {
       recordMomentum(event)
+      let ends = event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)
+      if ends, momentumInterrupted(), flight != nil, !gestureIsHorizontal, !horizontalTaken {
+        // A finger on the trackpad (a touch or a tap, which sends no `mayBegin`) ends the system's momentum at once,
+        // its deltas still large; NSScrollView stops there (Mo's recorded gestures: 9 of 13 flings ended so, 0.18–0.43 s
+        // after the lift). A stream that runs out ends slow, and the fling goes on to its own end.
+        momentumSpeed = 0
+        catchFlight()
+        caughtFlight = false
+        rest()
+        return
+      }
+      if !ends {
+        let dy = Double(event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * Self.lineScroll)
+        // The system's momentum events come at 60 Hz.
+        momentumSpeed = abs(dy) * 60
+      }
       if gestureIsHorizontal || horizontalTaken {
         routeHorizontal(event)
       } else if coast != nil {
@@ -162,6 +178,7 @@ extension TimelineListView {
     }
     if phase.contains(.began) {
       stopScrollMotions()
+      momentumSpeed = 0
       horizontalTaken = false
       gestureIsHorizontal = abs(dx) > abs(dy) * 1.5
       if gestureIsHorizontal {
@@ -296,6 +313,16 @@ extension TimelineListView {
     }
     drag(by: delta)
   }
+
+  /// Whether the momentum stream ending now was cut short: its latest event still moved faster than a stream running
+  /// out does (its last events are a few points a frame).
+  func momentumInterrupted() -> Bool {
+    defer { momentumSpeed = 0 }
+    return momentumSpeed > Self.interruptedMomentumSpeed
+  }
+
+  /// 4 pt a frame at 60 Hz.
+  static var interruptedMomentumSpeed: Double { 240 }
 
   /// The system's momentum events for the gesture just released, kept beside what the list played.
   func recordMomentum(_ event: NSEvent) {

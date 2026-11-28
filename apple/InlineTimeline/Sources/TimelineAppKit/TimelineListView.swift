@@ -384,6 +384,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: NSView {
   public var coastsOnMainThread = false
   /// The momentum events of the gesture whose lift started the running fling: when the last came, and whether one has.
   var momentumSteer: (last: CFTimeInterval, started: Bool)?
+  /// The speed of the system's latest momentum event (pt/s): a stream that ends while still fast was cut by a touch.
+  var momentumSpeed: Double = 0
   /// How far ahead of what is shown the content's model is put while it follows a motion: AppKit draws the rows the
   /// next frame brings in before it shows them (without it, a row or two at the leading edge showed undrawn).
   static var followLead: CFTimeInterval { 1.0 / 60 }
