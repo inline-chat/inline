@@ -4,6 +4,7 @@ import {
   type BotChatSettingsDocument,
   type BotChatSettingsResponse,
   type BotChatSettingsValue,
+  type MessageActionResponseUi,
 } from "@inline-chat/realtime-sdk"
 
 export const OPENCLAW_BOT_CHAT_SETTINGS_VERSION = 1
@@ -13,6 +14,7 @@ const DEFAULT_MODEL_ITEM_ID = "model-default"
 const REASONING_ITEM_ID = "reasoning"
 const FOLLOWING_ITEM_ID = "following"
 const REPLY_THREADS_ITEM_ID = "reply-threads"
+const DASHBOARD_ITEM_ID = "dashboard"
 const READ_ONLY_REASON = "Only an authorized OpenClaw controller can change this."
 
 export type OpenClawBotChatSettingsOption = {
@@ -35,6 +37,8 @@ export type OpenClawBotChatSettingsContext = {
   following?: boolean
   replyThreads: "auto" | "on"
   canSetDefaultModel?: boolean
+  /** An authorized controller may open the Control UI. */
+  canOpenDashboard?: boolean
 }
 
 export type OpenClawBotChatSettingsMutators = {
@@ -43,6 +47,8 @@ export type OpenClawBotChatSettingsMutators = {
   setReasoningLevel?(value: string): Promise<void>
   setFollowing?(value: boolean): Promise<void>
   setReplyThreads?(value: "auto" | "on"): Promise<void>
+  /** What Inline shows the person who pressed Open Dashboard: a link to open, or an alert. */
+  openDashboard?(): Promise<MessageActionResponseUi>
   resolveContext(): Promise<OpenClawBotChatSettingsContext>
 }
 
@@ -148,7 +154,7 @@ export function buildOpenClawBotChatSettingsDocument(
         label: "Use as default",
         description: "For new sessions.",
         ...disabled,
-        control: { oneofKind: "button", button: {} },
+        control: { oneofKind: "button", button: { opensUrl: false } },
       })
     }
   }
@@ -219,6 +225,19 @@ export function buildOpenClawBotChatSettingsDocument(
     }],
   })
 
+  if (context.access === "full" && context.canOpenDashboard) {
+    sections.push({
+      id: "dashboard",
+      items: [{
+        id: DASHBOARD_ITEM_ID,
+        label: "Open Dashboard",
+        description: "OpenClaw Control UI in your browser.",
+        disabled: false,
+        control: { oneofKind: "button", button: { opensUrl: true } },
+      }],
+    })
+  }
+
   if (context.access === "readOnly") {
     sections.push({
       id: "access",
@@ -252,6 +271,7 @@ export function buildOpenClawBotChatSettingsDocument(
       context.following == null ? "unknown" : String(context.following),
       context.replyThreads,
       String(context.canSetDefaultModel === true),
+      String(context.canOpenDashboard === true),
       ...optionsRevision(modelOptions),
       ...optionsRevision(reasoningOptions),
     ]),
@@ -288,6 +308,14 @@ export async function invokeOpenClawBotChatSetting(params: {
       "You do not have access to change this.",
       currentDocument,
     )
+  }
+
+  if (params.itemId === DASHBOARD_ITEM_ID) {
+    if (params.value != null || !params.context.canOpenDashboard || !params.mutators.openDashboard) {
+      return openClawBotChatSettingsProblem(BotChatSettingsProblem_Code.INVALID_VALUE, "Dashboard unavailable.", currentDocument)
+    }
+    // Opening a page changes no setting: answer with the same document.
+    return { ...responseWithDocument(currentDocument), ui: await params.mutators.openDashboard() }
   }
 
   const selected = stringValue(params.value)

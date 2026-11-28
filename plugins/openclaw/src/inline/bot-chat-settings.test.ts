@@ -217,3 +217,50 @@ describe("OpenClaw Bot Chat Settings", () => {
   })
 
 })
+
+describe("OpenClaw dashboard row", () => {
+  const owner: OpenClawBotChatSettingsContext = { ...context, canOpenDashboard: true }
+
+  it("offers Open Dashboard to an authorized controller only", () => {
+    const document = buildOpenClawBotChatSettingsDocument(owner)
+    const dashboard = document.sections.find((section) => section.id === "dashboard")?.items[0]
+    expect(dashboard).toMatchObject({
+      id: "dashboard",
+      label: "Open Dashboard",
+      control: { oneofKind: "button", button: { opensUrl: true } },
+    })
+    expect(buildOpenClawBotChatSettingsDocument(context).sections.some((section) => section.id === "dashboard")).toBe(false)
+    expect(
+      buildOpenClawBotChatSettingsDocument({ ...owner, access: "readOnly" }).sections.some((section) => section.id === "dashboard"),
+    ).toBe(false)
+  })
+
+  it("answers a press with the link and the unchanged document", async () => {
+    const document = buildOpenClawBotChatSettingsDocument(owner)
+    const ui = { kind: { oneofKind: "openUrl" as const, openUrl: { url: "http://127.0.0.1:18789/#bootstrapToken=t", sensitive: true } } }
+    const openDashboard = vi.fn(async () => ui)
+    const response = await invokeOpenClawBotChatSetting({
+      context: owner,
+      mutators: { openDashboard, resolveContext: async () => owner },
+      itemId: "dashboard",
+      documentRevision: document.revision,
+    })
+    expect(openDashboard).toHaveBeenCalledOnce()
+    expect(response.ui).toEqual(ui)
+    expect(response.result).toEqual({ oneofKind: "document", document })
+  })
+
+  it("refuses the press for someone who isn't a controller", async () => {
+    const document = buildOpenClawBotChatSettingsDocument(context)
+    const openDashboard = vi.fn()
+    const response = await invokeOpenClawBotChatSetting({
+      context,
+      mutators: { openDashboard, resolveContext: async () => context },
+      itemId: "dashboard",
+      documentRevision: document.revision,
+    })
+    expect(openDashboard).not.toHaveBeenCalled()
+    expect(response.result.oneofKind).toBe("problem")
+    expect(response.ui).toBeUndefined()
+  })
+})

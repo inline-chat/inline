@@ -55,15 +55,22 @@ import {
   BotCapability_Kind,
   BotChatSettingsProblem_Code,
   DialogFollowMode,
+  InlineResponseUi,
   InlineSdkAuthenticationError,
   InlineSdkClient,
   JsonFileStateStore,
   Method,
   registerBotCapabilitiesWithRetry,
   type Message,
+  type MessageActionResponseUi,
   type MessageActions,
   type User,
 } from "@inline-chat/realtime-sdk"
+import {
+  buildOpenClawDashboardLink,
+  defaultOpenClawDashboardDeps,
+  OpenClawDashboardUnavailableError,
+} from "./dashboard-link.js"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { shareInlineAccountClient } from "./client-registry.js"
 import { createInlineMessageSender } from "./delivery.js"
@@ -5039,7 +5046,28 @@ export async function monitorInlineProvider(params: {
           : { following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode) }),
         replyThreads: params.replyThreads ?? replyMode ?? "auto",
         canSetDefaultModel,
+        canOpenDashboard: canSetDefaultModel && currentConfig.gateway?.controlUi?.enabled !== false,
       },
+    }
+  }
+
+  const openOpenClawDashboard = async (): Promise<MessageActionResponseUi> => {
+    try {
+      const currentConfig = resolveInlineLiveConfig(core.config.current()) as OpenClawConfig
+      const link = await buildOpenClawDashboardLink(currentConfig, await defaultOpenClawDashboardDeps())
+      // The link carries a one-time login: log where it goes, never the link.
+      log?.info(`[${account.accountId}] AGENT_SETTINGS_TRACE phase=dashboard_link loopback_only=${link.unreachableText ? 1 : 0}`)
+      return InlineResponseUi.openUrl(link.url, {
+        sensitive: true,
+        hostLabel: link.hostLabel,
+        ...(link.unreachableText ? { unreachableText: link.unreachableText } : {}),
+      })
+    } catch (error) {
+      if (error instanceof OpenClawDashboardUnavailableError) {
+        return InlineResponseUi.alert(error.message, "Dashboard unavailable")
+      }
+      runtime.error?.(`inline agent dashboard link failed: ${String(error)}`)
+      return InlineResponseUi.alert("OpenClaw couldn't create a dashboard link. Try again.", "Dashboard unavailable")
     }
   }
 
@@ -5270,6 +5298,7 @@ export async function monitorInlineProvider(params: {
             }),
             setDefaultModel: () => setOpenClawDefaultModel(ingress, resolved.context.currentModel ?? ""),
             setReasoningLevel: (value) => setOpenClawSessionReasoning(ingress, value),
+            openDashboard: openOpenClawDashboard,
             setFollowing: async (value) => {
               await updateInlineFollowMode({
                 client,
