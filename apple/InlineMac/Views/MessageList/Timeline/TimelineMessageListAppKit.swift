@@ -1124,6 +1124,11 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
       // The reader took the list: a message still to arrive no longer moves it, nor does a return to latest.
       pendingArrival = nil
       if latestJumpRunning { latestInterrupted = true }
+      if dayStartSearching {
+        dayStartSearching = false
+        jumpTask?.cancel()
+        jumpTask = nil
+      }
     }
     #if DEBUG || DEBUG_BUILD
     list.onGestureRecord = { TimelineGestureLog.append($0) }
@@ -1214,6 +1219,9 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
   /// A return to latest is fetching, and the reader scrolled meanwhile: its last window keeps their place.
   private var latestJumpRunning = false
   private var latestInterrupted = false
+  /// A day pill's click is still finding the day's start (older pages can come from the server): the reader scrolling
+  /// meanwhile drops it, so a slow fetch never yanks them back later.
+  private var dayStartSearching = false
 
   private func observeChatEvents() {
     let state = ChatsManager.get(for: peerId, chatId: chat.id)
@@ -1239,6 +1247,7 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
     pendingArrival = nil
     latestJumpRunning = false
     latestInterrupted = false
+    dayStartSearching = false
     jumpRevision &+= 1
     return jumpRevision
   }
@@ -2886,11 +2895,13 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
     guard hasPlacedInitialRows, !isDisposed else { return }
     let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86_400)
     let peer = peerId
+    dayStartSearching = true
     jumpTask = Task { @MainActor [weak self] in
       do {
         let first = try await ChatDayStart.firstMessageId(peer: peer, dayStart: dayStart, dayEnd: dayEnd)
         guard let self, !Task.isCancelled, !isDisposed, jumpRevision == revision else { return }
         jumpTask = nil
+        dayStartSearching = false
         guard let first else { return }
         showDay(dayStart, firstMessageId: first)
       } catch is CancellationError {
@@ -2898,6 +2909,7 @@ final class TimelineMessageListAppKit: NSViewController, ChatMessageListControll
       } catch {
         guard let self, !Task.isCancelled, !isDisposed, jumpRevision == revision else { return }
         jumpTask = nil
+        dayStartSearching = false
         log.error("Failed to find the start of a day", error: error)
       }
     }
