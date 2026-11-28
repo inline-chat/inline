@@ -108,7 +108,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case coreTextMessageText
   case timelineMessageList
   case fileBrowser
-  case nativeFileDownloads
 
   // Debug
   case syncEngine
@@ -171,7 +170,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .inlineMathAttachments,
          .messageWidgets, .quickForward, .stableChatRoute, .coreTextMessageText, .timelineMessageList,
-         .fileBrowser, .nativeFileDownloads:
+         .fileBrowser:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
          .appCache, .mediaCache, .dismissedPopovers, .themeWorkshop, .localDatabase:
@@ -259,7 +258,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .coreTextMessageText: "Core Text Message Text"
     case .timelineMessageList: "New Message List"
     case .fileBrowser: "File Browser"
-    case .nativeFileDownloads: "Native File Downloads"
     case .syncEngine: "Sync Engine"
     case .appPermissions: "App Permissions"
     case .connectionSecurity: "Connection Security"
@@ -323,7 +321,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
          .messageWidgets:
       "Agents"
     case .quickForward, .stableChatRoute, .coreTextMessageText, .timelineMessageList: "Messages"
-    case .fileBrowser, .nativeFileDownloads: "Files"
+    case .fileBrowser: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
     case .themeWorkshop: "Appearance"
@@ -412,7 +410,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .coreTextMessageText: ["performance", "renderer", "text", "scroll", "core text"]
     case .timelineMessageList: ["message list", "timeline", "scroll", "performance", "animation"]
     case .fileBrowser: ["files window", "browse"]
-    case .nativeFileDownloads: ["download", "realtime"]
     case .syncEngine: ["realtime", "sync"]
     case .appPermissions: ["notifications", "microphone", "permissions"]
     case .connectionSecurity: ["protocol", "authentication"]

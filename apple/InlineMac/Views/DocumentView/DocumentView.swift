@@ -620,7 +620,6 @@ class DocumentView: NSView {
     startMonitoringProgress()
 
     // Start the download
-    let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
     FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message, priority: priority) { [weak self] result in
       guard let self else { return }
 
@@ -637,7 +636,7 @@ class DocumentView: NSView {
           Log.shared.error("Document download failed: \(error)")
           self.documentState = .needsDownload
           self.stopMonitoringProgress()
-          if !FileDownloader.isCancellation(error), startedNativeDownload {
+          if !FileDownloader.isCancellation(error) {
             ToastCenter.shared.showError(
               "File download failed. Please try again."
             )

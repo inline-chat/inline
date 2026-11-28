@@ -13,8 +13,6 @@ struct ExperimentalSettingsDetailView: View {
   @AppStorage(SidebarAgents.rowNewThreadButtonKey)
   private var agentRowNewThreadEnabled = false
 
-  @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
-  private var nativeFileDownloadsEnabled = false
   @AppStorage(ExperimentalFeatureFlags.quickForwardKey)
   private var quickForwardEnabled = false
 
@@ -113,30 +111,9 @@ struct ExperimentalSettingsDetailView: View {
         Button("Open Files") { FilesWindowController.show(dependencies: dependencies) }
           .disabled(auth.currentUserId == nil)
       }
-      Toggle(isOn: $nativeFileDownloadsEnabled) {
-        SettingsRowLabel(
-          .nativeFileDownloads,
-          description: "Download documents and videos over the realtime connection."
-        )
-      }
-      .settingsSearchAnchor(.nativeFileDownloads)
-      .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
     } header: {
       SettingsSectionHeader("Files")
-    } footer: {
-      if nativeFileDownloadsAvailable {
-        Text("Other media use standard downloads. Turn off to use standard downloads for everything.")
-      } else if nativeFileDownloadsEnabled {
-        Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
-      } else {
-        Text("Sign in to use native file downloads.")
-      }
     }
-  }
-
-  private var nativeFileDownloadsAvailable: Bool {
-    // Observe the existing auth owner so the control updates after a session change.
-    auth.getIsLoggedIn()
   }
 }
 
