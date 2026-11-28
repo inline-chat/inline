@@ -1,7 +1,7 @@
 //! The driver and session traits (spec §4.2).
 
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -37,6 +37,26 @@ pub trait HarnessDriver: Send + Sync {
 
     /// Native sessions per folder or project, with who holds each.
     fn sessions<'a>(&'a self, query: SessionQuery) -> DriverFuture<'a, SessionPage>;
+
+    /// One native session by id, wherever it lives, or `None` when this
+    /// harness has no such session.
+    fn session<'a>(
+        &'a self,
+        _session: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, Option<SessionSummary>> {
+        Box::pin(async { Err(DriverError::Unsupported("session lookup")) })
+    }
+
+    /// The whole visible conversation of one native session, oldest turn
+    /// first: what was asked, the agent's prose, and how many steps each turn
+    /// took. Tool calls and their output are counted, never copied.
+    fn history<'a>(
+        &'a self,
+        _session: &'a ProviderSessionId,
+        _folder: Option<&'a Path>,
+    ) -> DriverFuture<'a, Vec<HistoryTurn>> {
+        Box::pin(async { Err(DriverError::Unsupported("session history")) })
+    }
 
     /// Starts, resumes or forks a session. Errors are typed so the apps can
     /// offer the fix.
@@ -243,6 +263,81 @@ pub struct SessionSummary {
     /// Archived.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+}
+
+/// One turn of a native session's conversation, as its own app shows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryTurn {
+    /// Stable native identity of the turn.
+    pub id: String,
+    /// The person's words and the agent's prose, in order. A steer is a
+    /// second user entry inside the same turn.
+    pub entries: Vec<HistoryEntry>,
+    /// How much work the turn did between its prose.
+    #[serde(default)]
+    pub steps: HistorySteps,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+    /// Inline delivered this turn's input, so an Inline thread already shows it.
+    #[serde(default)]
+    pub from_inline: bool,
+    /// The turn finished; a running turn's prose may still grow.
+    #[serde(default)]
+    pub complete: bool,
+}
+
+/// One message in a [`HistoryTurn`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    /// The person or the agent.
+    pub role: HistoryRole,
+    /// Stable native identity of this message.
+    pub item_ref: String,
+    /// Markdown as the native app shows it.
+    pub text: String,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+}
+
+/// Who wrote a [`HistoryEntry`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRole {
+    /// The person driving the session.
+    User,
+    /// The agent.
+    Assistant,
+}
+
+/// Counts of a turn's tool work, for a one-line summary.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistorySteps {
+    /// Shell commands run.
+    pub commands: u32,
+    /// Files created or changed.
+    pub edits: u32,
+    /// Files read.
+    pub reads: u32,
+    /// Code or file searches.
+    pub searches: u32,
+    /// Web searches and fetches.
+    pub web: u32,
+    /// Sub-agents started.
+    pub agents: u32,
+    /// Other tool calls (MCP and the like).
+    pub tools: u32,
+}
+
+impl HistorySteps {
+    /// No work was counted.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// How to open a session.

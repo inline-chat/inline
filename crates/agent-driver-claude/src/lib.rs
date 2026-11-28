@@ -22,6 +22,7 @@ pub mod agents;
 pub mod client;
 pub mod control;
 pub mod harness;
+pub mod history;
 pub mod input;
 pub mod mcp;
 pub mod options;
@@ -41,6 +42,6 @@ pub use control::{
 };
 pub use input::{Origin, Priority, UserContent, UserMessage};
 pub use options::{LaunchOptions, ProcessHost, SessionStart};
-pub use sessions::{SessionInfo, SessionMessage, SessionStore};
+pub use sessions::{SessionInfo, SessionMessage, SessionStore, TranscriptEntry};
 pub use version::ClaudeVersion;
 pub use wire::{CliMessage, MessageKind, StartupFailure};

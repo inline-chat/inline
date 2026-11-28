@@ -7,6 +7,7 @@
 mod connection;
 mod decisions;
 mod delivery;
+mod history;
 mod manifest;
 mod mapper;
 mod suggestion;

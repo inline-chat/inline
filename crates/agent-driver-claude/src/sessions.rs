@@ -53,6 +53,26 @@ pub struct SessionMessage {
     pub timestamp: Option<String>,
 }
 
+/// One user or assistant entry on the conversation chain, meta included.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TranscriptEntry {
+    /// An assistant entry; otherwise a user entry.
+    pub assistant: bool,
+    pub uuid: String,
+    /// RFC 3339.
+    pub timestamp: Option<String>,
+    /// Claude Code's own input (attachments, hooks, Inline's notes), not
+    /// words the person typed.
+    pub meta: bool,
+    /// The summary that opens a compacted conversation.
+    pub compact_summary: bool,
+    /// Who produced a user entry (`human`, `task-notification`, …), when
+    /// Claude Code says.
+    pub origin: Option<String>,
+    /// The API message (`role`, `content`, `stop_reason`).
+    pub message: Value,
+}
+
 impl SessionStore {
     pub fn new(config_dir: impl Into<PathBuf>) -> Self {
         Self {
@@ -237,6 +257,45 @@ impl SessionStore {
             Some(limit) if limit > 0 => messages.take(limit).collect(),
             _ => messages.collect(),
         })
+    }
+
+    /// The conversation chain with Claude Code's own bookkeeping kept: meta
+    /// user entries (Inline's notes, attachments, hooks) are marked, not
+    /// dropped, so a reader can tell whose input started each turn.
+    pub fn transcript(
+        &self,
+        session_id: &str,
+        cwd: Option<&Path>,
+    ) -> io::Result<Vec<TranscriptEntry>> {
+        let Some(path) = self.find(session_id, cwd) else {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "no such session"));
+        };
+        let content = fs::read_to_string(path)?;
+        let entries = parse_transcript_entries(&content);
+        Ok(build_conversation_chain(&entries)
+            .into_iter()
+            .filter(|entry| {
+                matches!(entry_type(entry), "user" | "assistant")
+                    && !flag(entry, "isSidechain")
+                    && entry.get("teamName").is_none()
+            })
+            .map(|entry| TranscriptEntry {
+                assistant: entry_type(&entry) == "assistant",
+                uuid: uuid_of(&entry).to_string(),
+                timestamp: entry
+                    .get("timestamp")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                meta: flag(&entry, "isMeta"),
+                compact_summary: flag(&entry, "isCompactSummary"),
+                origin: entry
+                    .get("origin")
+                    .and_then(|origin| origin.get("kind"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                message: entry.get("message").cloned().unwrap_or(Value::Null),
+            })
+            .collect())
     }
 
     /// Appends a `custom-title` entry, as `renameSession` does. The last one

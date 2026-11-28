@@ -625,6 +625,68 @@ impl HarnessDriver for ClaudeHarness {
         })
     }
 
+    fn session<'a>(
+        &'a self,
+        session: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, Option<SessionSummary>> {
+        Box::pin(async move {
+            let Some(store) = self.store() else {
+                return Ok(None);
+            };
+            let id = session.as_str().to_owned();
+            let info = tokio::task::spawn_blocking(move || store.info(&id, None))
+                .await
+                .map_err(|error| DriverError::Protocol(error.to_string()))?;
+            let Some(info) = info else {
+                return Ok(None);
+            };
+            let cwd = info
+                .cwd
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/"));
+            let live = self.live_sessions(&cwd).await;
+            let own = self.own_pids();
+            Ok(Some(SessionSummary {
+                key: SessionKey {
+                    provider: provider(),
+                    session: session.clone(),
+                },
+                title: info.custom_title.clone(),
+                preview: info.first_prompt.clone().or(Some(info.summary.clone())),
+                folder: info.cwd.as_ref().map(PathBuf::from),
+                updated_at: Some((info.last_modified / 1000) as i64),
+                held_by: holder(&live, &info.session_id, &own).map(held_by),
+                archived: false,
+            }))
+        })
+    }
+
+    fn history<'a>(
+        &'a self,
+        session: &'a ProviderSessionId,
+        folder: Option<&'a std::path::Path>,
+    ) -> DriverFuture<'a, Vec<inline_agent_bridge::harness::HistoryTurn>> {
+        Box::pin(async move {
+            let store = self.store().ok_or_else(|| {
+                DriverError::Unavailable("Claude Code has no session store here".to_owned())
+            })?;
+            let id = session.as_str().to_owned();
+            let folder = folder.map(std::path::Path::to_path_buf);
+            let entries =
+                tokio::task::spawn_blocking(move || store.transcript(&id, folder.as_deref()))
+                    .await
+                    .map_err(|error| DriverError::Protocol(error.to_string()))?
+                    .map_err(|error| match error.kind() {
+                        std::io::ErrorKind::NotFound => DriverError::InvalidSession(
+                            "Claude Code has no such session".to_owned(),
+                        ),
+                        _ => DriverError::Unavailable(error.to_string()),
+                    })?;
+            Ok(crate::history::turns(&entries))
+        })
+    }
+
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
         Box::pin(async move {
             if !spec.folder.is_dir() {

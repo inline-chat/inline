@@ -679,6 +679,107 @@ impl HarnessDriver for CodexHarness {
         })
     }
 
+    fn session<'a>(
+        &'a self,
+        session: &'a ProviderSessionId,
+    ) -> DriverFuture<'a, Option<SessionSummary>> {
+        Box::pin(async move {
+            let connection = self.connection().await.map_err(open_to_driver)?;
+            let response = match connection
+                .request(Request {
+                    method: "thread/read",
+                    params: json!({"threadId": session.as_str(), "includeTurns": false}),
+                })
+                .await
+            {
+                Ok(response) => response,
+                Err(PeerError::Remote(error)) if is_missing_thread(&error) => return Ok(None),
+                Err(error) => return Err(peer_to_driver(error)),
+            };
+            let Some(thread) = response.get("thread") else {
+                return Ok(None);
+            };
+            Ok(Some(SessionSummary {
+                key: SessionKey {
+                    provider: ProviderId::new("codex")
+                        .map_err(|error| DriverError::Protocol(error.to_string()))?,
+                    session: session.clone(),
+                },
+                title: text(thread.get("name")),
+                preview: text(thread.get("preview")),
+                folder: text(thread.get("cwd")).map(PathBuf::from),
+                updated_at: thread.get("updatedAt").and_then(Value::as_i64),
+                held_by: None,
+                archived: false,
+            }))
+        })
+    }
+
+    fn history<'a>(
+        &'a self,
+        session: &'a ProviderSessionId,
+        _folder: Option<&'a std::path::Path>,
+    ) -> DriverFuture<'a, Vec<inline_agent_bridge::harness::HistoryTurn>> {
+        Box::pin(async move {
+            /// Far beyond any real thread; it only stops a runaway cursor.
+            const MAX_PAGES: usize = 400;
+            let connection = self.connection().await.map_err(open_to_driver)?;
+            let mut turns = Vec::new();
+            let mut cursor: Option<String> = None;
+            let mut seen = std::collections::HashSet::new();
+            for page in 0..MAX_PAGES {
+                let mut params = json!({
+                    "threadId": session.as_str(),
+                    "limit": 50,
+                    "sortDirection": "asc",
+                    "itemsView": "full",
+                });
+                if let Some(cursor) = &cursor {
+                    params["cursor"] = json!(cursor);
+                }
+                let response = match connection
+                    .request(Request {
+                        method: "thread/turns/list",
+                        params,
+                    })
+                    .await
+                {
+                    Ok(response) => response,
+                    // An app-server without turn paging reads the thread whole.
+                    Err(PeerError::Remote(error))
+                        if page == 0 && matches!(error.code, Some(-32601)) =>
+                    {
+                        return read_whole_thread(&connection, session).await;
+                    }
+                    Err(PeerError::Remote(error)) if is_missing_thread(&error) => {
+                        return Err(DriverError::InvalidSession(error.message));
+                    }
+                    Err(error) => return Err(peer_to_driver(error)),
+                };
+                turns.extend(
+                    response
+                        .get("data")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(super::history::turn),
+                );
+                match text(response.get("nextCursor")) {
+                    Some(next) if seen.insert(next.clone()) => cursor = Some(next),
+                    Some(_) => {
+                        return Err(DriverError::Protocol(
+                            "Codex repeated a turn page cursor".to_owned(),
+                        ));
+                    }
+                    None => return Ok(turns),
+                }
+            }
+            Err(DriverError::Protocol(
+                "Codex thread history did not end".to_owned(),
+            ))
+        })
+    }
+
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
         Box::pin(async move {
             // Unsubscribe can enter Codex's native shutdown just as the next
@@ -1644,6 +1745,40 @@ fn text(value: Option<&Value>) -> Option<String> {
 
 fn driver_error(error: PeerError) -> OpenError {
     OpenError::Driver(peer_to_driver(error))
+}
+
+/// Codex's refusal for a thread id it does not have.
+fn is_missing_thread(error: &crate::peer::RemoteError) -> bool {
+    let message = error.message.to_ascii_lowercase();
+    message.contains("not found")
+        || message.contains("no rollout")
+        || message.contains("invalid thread")
+}
+
+async fn read_whole_thread(
+    connection: &Connection,
+    session: &ProviderSessionId,
+) -> Result<Vec<inline_agent_bridge::harness::HistoryTurn>, DriverError> {
+    let response = connection
+        .request(Request {
+            method: "thread/read",
+            params: json!({"threadId": session.as_str(), "includeTurns": true}),
+        })
+        .await
+        .map_err(|error| match error {
+            PeerError::Remote(error) if is_missing_thread(&error) => {
+                DriverError::InvalidSession(error.message)
+            }
+            other => peer_to_driver(other),
+        })?;
+    Ok(response
+        .get("thread")
+        .and_then(|thread| thread.get("turns"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(super::history::turn)
+        .collect())
 }
 
 fn peer_to_driver(error: PeerError) -> DriverError {
